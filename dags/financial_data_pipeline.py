@@ -19,8 +19,8 @@ import os
 # Add parent directory to path to import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import alphavantage
-import fetch_news_data
+from extract import alphavantage
+from extract import fetch_news_data
 
 
 @dag(

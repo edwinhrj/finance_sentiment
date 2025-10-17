@@ -1,2 +1,43 @@
-market_data.csv
-news_data.csv
+# Data files
+*.csv
+*.json
+*.parquet
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Airflow
+airflow.db
+airflow.cfg
+logs/
+standalone_admin_password.txt
+webserver_config.py
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
