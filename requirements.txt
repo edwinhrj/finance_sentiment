@@ -1,0 +1,27 @@
+# API calls and data fetching
+requests>=2.31.0
+
+# Data manipulation and analysis
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Orchestration
+apache-airflow>=2.10.0
+
+# Dashboard
+streamlit>=1.35.0
+
+# NLP and Sentiment Analysis
+transformers>=4.40.0
+vaderSentiment>=3.3.2
+torch>=2.2.0
+
+# Additional useful libraries
+matplotlib>=3.8.0
+plotly>=5.18.0
+seaborn>=0.13.0
+
+# Utilities
+python-dotenv>=1.0.0
+
+
