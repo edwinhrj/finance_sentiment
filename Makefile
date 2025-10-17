@@ -31,7 +31,7 @@ create-venv:
 	@echo "--> Installing Python $(PYTHON_VERSION) using pyenv (if not already installed)..."
 	pyenv install $(PYTHON_VERSION) --skip-existing
 	@echo "--> Creating virtual environment '$(VENV_NAME)'..."
-	"$(shell pyenv root)/versions/$(PYTHON_VERSION)/bin/python" -m venv $(VENV_NAME)
+	$$(pyenv root)/versions/$(PYTHON_VERSION)/bin/python -m venv $(VENV_NAME)
 	@echo "--- Virtual environment created successfully. ---"
 
 install-python-deps:
