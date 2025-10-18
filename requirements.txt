@@ -1,5 +1,5 @@
 # API calls and data fetching
-requests>=2.31.0
+yfinance>=0.2.43
 
 # Data manipulation and analysis
 pandas>=2.1.0

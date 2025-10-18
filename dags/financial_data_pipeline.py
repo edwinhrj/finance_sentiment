@@ -18,10 +18,9 @@ import os
 
 # Add parent directory to path to import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from extract import alphavantage
+from extract import yfinance
 from extract import fetch_news_data
-
+from transform import transform_sentiment
 
 @dag(
     dag_id='financial_data_pipeline',
@@ -33,22 +32,22 @@ from extract import fetch_news_data
         'retries': 1,
     },
     description='Daily financial data extraction pipeline',
-    tags=['finance', 'data-extraction', 'alpha-vantage', 'news-api'],
+    tags=['finance', 'data-extraction', 'y-finance', 'news-api'],
 )
 def financial_data_pipeline():
     """
     DAG for extracting financial market data and news articles in parallel.
     """
     
-    @task(task_id='extract_alphavantage')
+    @task(task_id='extract_yfinance')
     def extract_market_data():
         """
-        Extract OHLC market data from Alpha Vantage API for configured tickers.
+        Extract OHLC market data from yfinance package for configured tickers.
         """
-        print("Starting Alpha Vantage data extraction...")
+        print("Starting yfinance data extraction...")
         
         # Fetch data for all tickers
-        df = alphavantage.fetch_all_tickers(alphavantage.TICKERS)
+        df = yfinance.fetch_all_tickers(yfinance.TICKERS)
         
         if df is not None and not df.empty:
             print(f"\n📊 Latest Market Open & Close Prices")
@@ -61,7 +60,7 @@ def financial_data_pipeline():
             
             return f"Successfully extracted {len(df)} ticker records"
         else:
-            raise ValueError("Failed to extract market data from Alpha Vantage")
+            raise ValueError("Failed to extract market data from yfinance")
     
     @task(task_id='fetch_news')
     def fetch_news_articles():
@@ -78,12 +77,23 @@ def financial_data_pipeline():
         else:
             raise ValueError("Failed to fetch news data from NewsAPI")
     
+    @task(task_id='transform_sentiment')
+    def transform_data():
+        """
+        Reads market_data.csv + news_data.csv,
+        computes sentiment, compares with price change,
+        and uploads to Postgres.
+        """
+        print("🔄 Starting data transformation (sentiment + price correlation)...")
+        transform_sentiment.main()
+        print("✅ Transformation and upload to Postgres completed successfully.")
+
     # Define parallel task execution
     # Both tasks run independently and in parallel
-    extract_market_data()
-    fetch_news_articles()
+    market_task = extract_market_data()
+    news_task = fetch_news_articles()
+    [market_task, news_task] >> transform_data()
 
 
 # Instantiate the DAG
 financial_data_pipeline_dag = financial_data_pipeline()
-
