@@ -18,6 +18,8 @@ import os
 
 # Add parent directory to path to import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, "/usr/local/airflow")
+
 from extract import yfinance
 from extract import fetch_news_data
 from transform import transform_sentiment

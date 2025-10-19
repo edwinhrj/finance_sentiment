@@ -1,100 +1,99 @@
 """
-Script to fetch news data from NewsAPI and store it in a DataFrame.
+Script to fetch news data for multiple tickers from NewsAPI
+and store them in one DataFrame with a 'topic' column.
 """
 
 import requests
 import pandas as pd
-from typing import Optional
 from datetime import datetime, timedelta
+from typing import Optional, List
+
+# ------------------------------------------------------------
+# CONFIG
+# ------------------------------------------------------------
+API_KEY = "bdd295d9894c4f078a2973fd7cd15b97"
+TICKERS = ["AAPL", "MSFT", "AMZN", "GOOGL", "META"]
+
+# Automatically get the date (2 days ago)
+today = datetime.now()
+two_days_ago = today - timedelta(days=2)
+DATE_STR = two_days_ago.strftime("%Y-%m-%d")
 
 
-def fetch_news_data(api_url: str) -> Optional[pd.DataFrame]:
+# ------------------------------------------------------------
+# FUNCTION: Fetch News for One Topic
+# ------------------------------------------------------------
+def fetch_news_data_for_topic(ticker: str) -> Optional[pd.DataFrame]:
     """
-    Fetch news data from NewsAPI endpoint and return a DataFrame with selected columns.
-    
-    Args:
-        api_url: The full API endpoint URL with query parameters
-        
-    Returns:
-        DataFrame containing source, title, and content columns, or None if request fails
+    Fetch news data for one ticker and return a DataFrame with a 'topic' column.
     """
+    api_url = (
+        f"https://newsapi.org/v2/everything?"
+        f"q={ticker}&from={DATE_STR}&to={DATE_STR}&sortBy=popularity&apiKey={API_KEY}"
+    )
+
     try:
-        # Make GET request to the API
         response = requests.get(api_url)
-        response.raise_for_status()  # Raise exception for bad status codes
-        
-        # Parse JSON response
+        response.raise_for_status()
         data = response.json()
-        
-        # Check if request was successful
-        if data.get('status') != 'ok':
-            print(f"API returned error status: {data.get('status')}")
+
+        if data.get("status") != "ok":
+            print(f"⚠️ API error for {ticker}: {data.get('status')}")
             return None
-        
-        # Extract articles
-        articles = data.get('articles', [])
-        
+
+        articles = data.get("articles", [])
         if not articles:
-            print("No articles found in the response")
+            print(f"ℹ️ No articles found for {ticker}")
             return None
-        
-        # Extract desired columns
-        processed_data = []
-        for article in articles:
-            processed_data.append({
-                'source_id': article.get('source', {}).get('id'),
-                'source_name': article.get('source', {}).get('name'),
-                'title': article.get('title'),
-                'content': article.get('content'),
-                'publishedAt': article.get('publishedAt')
-            })
-        
-        # Create DataFrame
-        df = pd.DataFrame(processed_data)
-        
-        print(f"Successfully fetched {len(df)} articles")
+
+        # Extract relevant fields + add topic column
+        processed = [
+            {
+                "source_id": art.get("source", {}).get("id"),
+                "source_name": art.get("source", {}).get("name"),
+                "title": art.get("title"),
+                "content": art.get("content"),
+                "publishedAt": art.get("publishedAt"),
+                "topic": ticker,
+            }
+            for art in articles
+        ]
+
+        df = pd.DataFrame(processed)
+        print(f"✅ {ticker}: fetched {len(df)} articles")
         return df
-        
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching data: {e}")
-        return None
+
     except Exception as e:
-        print(f"Error processing data: {e}")
+        print(f"❌ Error fetching {ticker}: {e}")
         return None
 
 
+# ------------------------------------------------------------
+# MAIN
+# ------------------------------------------------------------
 def main():
-    """Main function to demonstrate usage."""
-    # Calculate date 2 days before today
-    today = datetime.now()
-    two_days_ago = today - timedelta(days=2)
-    date_str = two_days_ago.strftime('%Y-%m-%d')
-    
-    # API endpoint with dynamically calculated date
-    api_url = f"https://newsapi.org/v2/everything?q=Apple&from={date_str}&to={date_str}&sortBy=popularity&apiKey=bdd295d9894c4f078a2973fd7cd15b97"
-    
-    # Fetch data
-    df = fetch_news_data(api_url)
-    
-    if df is not None:
-        # Display basic information
-        print("\nDataFrame Info:")
-        print(f"Shape: {df.shape}")
-        print(f"\nColumns: {df.columns.tolist()}")
-        print(f"\nFirst few rows:")
-        print(df.head())
-        
-        # Optional: Save to CSV
-        output_file = "news_data.csv"
-        df.to_csv(output_file, index=False)
-        print(f"\nData saved to {output_file}")
-        
-        return df
-    else:
-        print("Failed to fetch data")
+    all_dfs = []
+
+    for ticker in TICKERS:
+        df = fetch_news_data_for_topic(ticker)
+        if df is not None:
+            all_dfs.append(df)
+
+    if not all_dfs:
+        print("🚫 No data fetched for any ticker.")
         return None
+
+    # Combine and save
+    combined_df = pd.concat(all_dfs, ignore_index=True)
+    combined_df.to_csv("news_data.csv", index=False)
+
+    print("\n📊 Final combined dataset:")
+    print(combined_df.info())
+    print(combined_df.head())
+
+    print(f"\n✅ Saved to news_data.csv with {len(combined_df)} total rows")
+    return combined_df
 
 
 if __name__ == "__main__":
-    df = main()
-
+    main()

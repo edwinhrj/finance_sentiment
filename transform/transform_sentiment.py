@@ -1,14 +1,8 @@
 """
-Transform step: combines market data (yfinance) and news sentiment (Hugging Face)
-and uploads the joined output to PostgreSQL.
-
-Steps:
-1. Read `market_data.csv` and `news_data.csv`
-2. For each ticker, compute sentiment_from_yesterday using Hugging Face
-3. Compute % price change (close/open)
-4. Compare sentiment vs price movement → add 'match' column
-5. Add created_at, id, and stock_ticker columns
-6. Upload to Postgres: database=finance, schema=tables, table=sentiment
+Final version (content-only, with default positive sentiment):
+Aggregates article-level sentiment per topic (ticker),
+ignores invalid or missing content,
+and defaults to 'positive' if no sentiment is found.
 """
 
 import pandas as pd
@@ -20,10 +14,10 @@ from sqlalchemy import create_engine
 from transformers import pipeline
 
 # ---------------------------------------------------------------------
-# Configuration
+# Config
 # ---------------------------------------------------------------------
-MARKET_CSV = "/usr/local/airflow/dags/market_data.csv"
-NEWS_CSV = "/usr/local/airflow/dags/news_data.csv"
+MARKET_CSV = "/usr/local/airflow/market_data.csv"
+NEWS_CSV = "/usr/local/airflow/news_data.csv"
 
 DB_CONN_STR = (
     "postgresql://postgres.zjtwtcnlrdkbtibuwlfd:"
@@ -31,52 +25,74 @@ DB_CONN_STR = (
     "?sslmode=require"
 )
 
-# Instantiate Hugging Face sentiment pipeline (lightweight model)
-sentiment_pipeline = pipeline("sentiment-analysis")
+sentiment_pipeline = pipeline(
+    "sentiment-analysis",
+    model="distilbert/distilbert-base-uncased-finetuned-sst-2-english",
+    revision="714eb0f"
+)
 
 # ---------------------------------------------------------------------
-# Step 1: Load CSVs
+# Step 1: Load data
 # ---------------------------------------------------------------------
 def load_data():
     market_df = pd.read_csv(MARKET_CSV)
     news_df = pd.read_csv(NEWS_CSV)
-    print(f"Loaded {len(market_df)} market rows and {len(news_df)} news rows")
+    print(f"📊 Loaded {len(market_df)} market rows, {len(news_df)} news rows")
     return market_df, news_df
 
 
 # ---------------------------------------------------------------------
-# Step 2: Analyze sentiment for each ticker
+# Step 2: Compute sentiment per topic (ticker)
 # ---------------------------------------------------------------------
 def compute_daily_sentiment(news_df: pd.DataFrame):
-    """
-    Groups news by ticker keyword (AAPL, MSFT, etc.) and outputs one
-    sentiment value per ticker for 'yesterday'.
-    """
-    tickers = ["AAPL", "MSFT", "AMZN", "GOOGL", "META"]
+    if "topic" not in news_df.columns:
+        raise ValueError("❌ 'topic' column missing in news_data.csv")
+
     results = []
+    grouped = news_df.groupby("topic")
 
-    for ticker in tickers:
-        related_news = news_df[
-            news_df["title"].str.contains(ticker, case=False, na=False)
-            | news_df["content"].str.contains(ticker, case=False, na=False)
-        ]
+    for topic, group in grouped:
+        sentiments = []
+        print(f"\n📰 Processing topic: {topic} ({len(group)} articles)")
 
-        if related_news.empty:
-            sentiment_label = "neutral"
+        for _, row in group.iterrows():
+            content = str(row.get("content", "")).strip()
+            if not content or content.lower() in ["nan", "none", "null"]:
+                continue
+
+            try:
+                out = sentiment_pipeline(content[:4000])[0]
+                label = out.get("label", "").lower()
+                if label in ["positive", "negative"]:
+                    sentiments.append(label)
+            except Exception as e:
+                print(f"⚠️ Error processing article for {topic}: {e}")
+                continue
+
+        # Majority vote — if no valid sentiment found, default to 'positive'
+        if len(sentiments) == 0:
+            sentiment_label = "positive"
         else:
-            # concatenate text for a combined sentiment
-            text_blob = " ".join(
-                related_news["content"].fillna("").tolist()
-            )[:4000]  # limit to avoid token overflow
-            sentiment = sentiment_pipeline(text_blob[:4000])[0]
-            sentiment_label = sentiment["label"].lower()
+            pos = sentiments.count("positive")
+            neg = sentiments.count("negative")
+            if pos > neg:
+                sentiment_label = "positive"
+            elif neg > pos:
+                sentiment_label = "negative"
+            else:
+                sentiment_label = "positive"  # tie → positive
 
-        results.append({"symbol": ticker, "sentiment_from_yesterday": sentiment_label})
+        results.append({"symbol": topic, "sentiment_from_yesterday": sentiment_label})
+        print(f"✅ {topic} → {sentiment_label.upper()} ({len(sentiments)} valid articles)")
 
-    return pd.DataFrame(results)
+    df_results = pd.DataFrame(results)
+    print("\n✅ Sentiment summary:")
+    print(df_results)
+    return df_results
+
 
 # ---------------------------------------------------------------------
-# Step 3: Compute % change from yfinance data
+# Step 3: Compute price change and trend
 # ---------------------------------------------------------------------
 def compute_price_change(market_df: pd.DataFrame):
     market_df["price_change_in_percentage"] = (
@@ -89,21 +105,30 @@ def compute_price_change(market_df: pd.DataFrame):
 
 
 # ---------------------------------------------------------------------
-# Step 4: Merge and compare
+# Step 4: Merge and align with DB schema
 # ---------------------------------------------------------------------
 def merge_sentiment_and_prices(sentiment_df, price_df):
     merged = pd.merge(sentiment_df, price_df, on="symbol", how="left")
-    merged["match"] = np.where(
-        merged["sentiment_from_yesterday"] == merged["price_trend"], "yes", "no"
+
+    merged["sentiment_from_yesterday"] = (
+        merged["sentiment_from_yesterday"]
+        .astype(str)
+        .str.lower()
+        .map({"positive": True, "negative": False})
+        .fillna(True)  # fallback to True if missing
     )
 
-    # Add created_at and id
+    merged["match"] = (
+        (merged["sentiment_from_yesterday"] & (merged["price_trend"] == "positive"))
+        | (~merged["sentiment_from_yesterday"] & (merged["price_trend"] == "negative"))
+    )
+
     sg_time = datetime.now(pytz.timezone("Asia/Singapore"))
-    merged["created_at"] = sg_time.strftime("%Y-%m-%d %H:%M:%S %Z")
+    merged["created_at"] = sg_time
     merged["id"] = [str(uuid.uuid4()) for _ in range(len(merged))]
     merged["stock_ticker"] = merged["symbol"]
 
-    return merged[
+    final_df = merged[
         [
             "id",
             "stock_ticker",
@@ -114,6 +139,10 @@ def merge_sentiment_and_prices(sentiment_df, price_df):
         ]
     ]
 
+    print("\n🧾 Final transformed DataFrame:")
+    print(final_df)
+    return final_df
+
 
 # ---------------------------------------------------------------------
 # Step 5: Upload to Postgres
@@ -122,23 +151,26 @@ def upload_to_postgres(df):
     engine = create_engine(DB_CONN_STR)
     df.to_sql(
         name="sentiment",
-        schema="tables",  # schema under finance
+        schema="finance",
         con=engine,
         if_exists="append",
         index=False,
     )
-    print(f"✅ Uploaded {len(df)} rows to Postgres table: finance.tables.sentiment")
+    print(f"✅ Uploaded {len(df)} rows to finance.sentiment")
 
 
 # ---------------------------------------------------------------------
-# Main execution
+# Main entry point
 # ---------------------------------------------------------------------
-if __name__ == "__main__":
+def main():
+    print("🔄 Starting transform_sentiment.main()...")
     market_df, news_df = load_data()
     sentiment_df = compute_daily_sentiment(news_df)
     price_df = compute_price_change(market_df)
     final_df = merge_sentiment_and_prices(sentiment_df, price_df)
-
-    print("\n🔎 Final transformed DataFrame:")
-    print(final_df)
     upload_to_postgres(final_df)
+    print("🏁 Transformation completed successfully.")
+
+
+if __name__ == "__main__":
+    main()
