@@ -5,6 +5,7 @@ ignores invalid or missing content,
 and defaults to 'positive' if no sentiment is found.
 """
 
+from functools import lru_cache
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -25,11 +26,14 @@ DB_CONN_STR = (
     "?sslmode=require"
 )
 
-sentiment_pipeline = pipeline(
-    "sentiment-analysis",
-    model="distilbert/distilbert-base-uncased-finetuned-sst-2-english",
-    revision="714eb0f"
-)
+@lru_cache(maxsize=1)
+def get_sentiment_pipeline():
+    from transformers import pipeline  # lazy import
+    return pipeline(
+        "sentiment-analysis",
+        model="distilbert/distilbert-base-uncased-finetuned-sst-2-english",
+        revision="714eb0f",
+    )
 
 # ---------------------------------------------------------------------
 # Step 1: Load data
@@ -45,8 +49,14 @@ def load_data():
 # Step 2: Compute sentiment per topic (ticker)
 # ---------------------------------------------------------------------
 def compute_daily_sentiment(news_df: pd.DataFrame):
+    # Normalize to expected column
     if "topic" not in news_df.columns:
-        raise ValueError("❌ 'topic' column missing in news_data.csv")
+        if "stock_ticker" in news_df.columns:
+            news_df = news_df.rename(columns={"stock_ticker": "topic"})
+        elif "symbol" in news_df.columns:
+            news_df = news_df.rename(columns={"symbol": "topic"})
+        else:
+            raise ValueError("❌ No 'topic', 'symbol', or 'stock_ticker' column found in news_df")
 
     results = []
     grouped = news_df.groupby("topic")
@@ -61,7 +71,8 @@ def compute_daily_sentiment(news_df: pd.DataFrame):
                 continue
 
             try:
-                out = sentiment_pipeline(content[:4000])[0]
+                nlp = get_sentiment_pipeline()
+                out = nlp(content[:4000])[0]
                 label = out.get("label", "").lower()
                 if label in ["positive", "negative"]:
                     sentiments.append(label)
@@ -95,6 +106,11 @@ def compute_daily_sentiment(news_df: pd.DataFrame):
 # Step 3: Compute price change and trend
 # ---------------------------------------------------------------------
 def compute_price_change(market_df: pd.DataFrame):
+    print("📢 market_df columns BEFORE normalization:", market_df.columns.tolist())
+
+    market_df = market_df.rename(columns=str.lower)
+
+    print("📢 market_df columns AFTER normalization:", market_df.columns.tolist())
     market_df["price_change_in_percentage"] = (
         (market_df["close"] - market_df["open"]) / market_df["open"] * 100
     )
@@ -147,30 +163,28 @@ def merge_sentiment_and_prices(sentiment_df, price_df):
 # ---------------------------------------------------------------------
 # Step 5: Upload to Postgres
 # ---------------------------------------------------------------------
-def upload_to_postgres(df):
-    engine = create_engine(DB_CONN_STR)
-    df.to_sql(
-        name="sentiment",
-        schema="finance",
-        con=engine,
-        if_exists="append",
-        index=False,
-    )
-    print(f"✅ Uploaded {len(df)} rows to finance.sentiment")
+# def upload_to_postgres(df):
+#    engine = create_engine(DB_CONN_STR)
+#    df.to_sql(
+#        name="sentiment",
+#        schema="finance",
+#        con=engine,
+#        if_exists="append",
+#        index=False,
+#    )
+#   print(f"✅ Uploaded {len(df)} rows to finance.sentiment")
 
 
 # ---------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------
-def main():
+def main(market_df, news_df):
     print("🔄 Starting transform_sentiment.main()...")
-    market_df, news_df = load_data()
+    # market_df, news_df = load_data()
     sentiment_df = compute_daily_sentiment(news_df)
     price_df = compute_price_change(market_df)
     final_df = merge_sentiment_and_prices(sentiment_df, price_df)
-    upload_to_postgres(final_df)
+    # upload_to_postgres(final_df)
+    return final_df
     print("🏁 Transformation completed successfully.")
 
-
-if __name__ == "__main__":
-    main()

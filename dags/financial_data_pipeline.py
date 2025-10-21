@@ -2,7 +2,7 @@
 Financial Data Pipeline DAG
 
 This DAG orchestrates daily extraction of:
-1. Market data from Alpha Vantage API
+1. Market data from yFinance API
 2. News data from NewsAPI
 
 Both tasks run in parallel every day at 5:01 AM UTC.
@@ -56,11 +56,12 @@ def financial_data_pipeline():
             print(df.to_string(index=False))
             
             # Save to CSV
-            csv_filename = "market_data.csv"
-            df.to_csv(csv_filename, index=False)
-            print(f"\n✅ Data saved to {csv_filename}")
+            # csv_filename = "market_data.csv"
+            # df.to_csv(csv_filename, index=False)
+            # print(f"\n✅ Data saved to {csv_filename}")
             
-            return f"Successfully extracted {len(df)} ticker records"
+            print(f"Successfully extracted {len(df)} ticker records")
+            return df 
         else:
             raise ValueError("Failed to extract market data from yfinance")
     
@@ -75,26 +76,35 @@ def financial_data_pipeline():
         df = fetch_news_data.main()
         
         if df is not None and not df.empty:
-            return f"Successfully fetched {len(df)} news articles"
+            print(f"Successfully fetched {len(df)} news articles")
+            return df
         else:
             raise ValueError("Failed to fetch news data from NewsAPI")
     
     @task(task_id='transform_sentiment')
-    def transform_data():
+    def transform_data(news_df, market_df):
         """
         Reads market_data.csv + news_data.csv,
         computes sentiment, compares with price change,
         and uploads to Postgres.
         """
         print("🔄 Starting data transformation (sentiment + price correlation)...")
-        transform_sentiment.main()
-        print("✅ Transformation and upload to Postgres completed successfully.")
-
+        final_df = transform_sentiment.main(news_df, market_df)
+        # print("✅ Transformation and upload to Postgres completed successfully.")
+        return final_df
+    
+    @task(task_id='load_to_supabase')
+    def load_data(final_df):
+        print("🚀 Loading data to Supabase Postgres...")
+        from load.load_data import bulk_insert_dataframe
+        bulk_insert_dataframe(final_df, table="finance.sentiment")  # adjust table name
+        print("✅ Load complete.")
     # Define parallel task execution
     # Both tasks run independently and in parallel
-    market_task = extract_market_data()
-    news_task = fetch_news_articles()
-    [market_task, news_task] >> transform_data()
+    market_df = extract_market_data()
+    news_df = fetch_news_articles()
+    final_df = transform_data(market_df, news_df)
+    final_df >> load_data(final_df)
 
 
 # Instantiate the DAG
