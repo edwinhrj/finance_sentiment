@@ -9,6 +9,7 @@ from functools import lru_cache
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import os
 import pytz
 import uuid
 from sqlalchemy import create_engine
@@ -17,8 +18,8 @@ from transformers import pipeline
 # ---------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------
-MARKET_CSV = "/usr/local/airflow/market_data.csv"
-NEWS_CSV = "/usr/local/airflow/news_data.csv"
+MARKET_CSV = os.getenv("MARKET_CSV", "market_data.csv")
+NEWS_CSV = os.getenv("NEWS_CSV", "news_data.csv")
 
 DB_CONN_STR = (
     "postgresql://postgres.zjtwtcnlrdkbtibuwlfd:"
@@ -185,6 +186,20 @@ def main(market_df, news_df):
     price_df = compute_price_change(market_df)
     final_df = merge_sentiment_and_prices(sentiment_df, price_df)
     # upload_to_postgres(final_df)
-    return final_df
     print("🏁 Transformation completed successfully.")
+    return final_df
 
+if __name__ == "__main__":
+    # Load from local CSVs in the project root (can be overridden by env vars)
+    market_df, news_df = load_data()
+    final_df = main(market_df, news_df)
+
+    # Preview a few rows and save to include/data/final_output.csv
+    from pathlib import Path
+    Path("include/data").mkdir(parents=True, exist_ok=True)
+    out_path = "include/data/final_output.csv"
+    final_df.to_csv(out_path, index=False)
+
+    print("\n✅ Preview of transformed output:")
+    print(final_df.head())
+    print(f"\n✅ Saved CSV to: {os.path.abspath(out_path)}")

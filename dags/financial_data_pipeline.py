@@ -20,7 +20,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, "/usr/local/airflow")
 
-from extract import yfinance
+from extract import fetch_yf_data
 from extract import fetch_news_data
 from transform import transform_sentiment
 
@@ -49,7 +49,7 @@ def financial_data_pipeline():
         print("Starting yfinance data extraction...")
         
         # Fetch data for all tickers
-        df = yfinance.fetch_all_tickers(yfinance.TICKERS)
+        df = fetch_yf_data.fetch_all_tickers(fetch_yf_data.TICKERS)
         
         if df is not None and not df.empty:
             print(f"\n📊 Latest Market Open & Close Prices")
@@ -104,7 +104,7 @@ def financial_data_pipeline():
     market_df = extract_market_data()
     news_df = fetch_news_articles()
     final_df = transform_data(market_df, news_df)
-    final_df >> load_data(final_df)
+    load_data(final_df)
 
 
 # Instantiate the DAG
