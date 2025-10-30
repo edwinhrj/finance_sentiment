@@ -90,13 +90,11 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
                 sector_id INTEGER REFERENCES finance.sectors(sector_id),
                 title TEXT,
                 content TEXT,
-                date DATE,
+                date_published DATE,
                 source_url TEXT UNIQUE,
                 author TEXT,
                 source_name VARCHAR(255),
                 impact_score FLOAT,
-                summary TEXT,
-                embedding_vector JSONB,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """))

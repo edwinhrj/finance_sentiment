@@ -23,6 +23,7 @@ sys.path.insert(0, "/usr/local/airflow")
 from extract import fetch_yf_data
 from extract import fetch_news_data
 from transform import transform_sentiment
+from transform import transform_article
 
 from load.load_data import bulk_insert_dataframe, setup_database_schema, hardcode_tickers_and_sectors
 
@@ -90,34 +91,47 @@ def financial_data_pipeline():
     @task(task_id='fetch_news')
     def fetch_news_articles():
         """
-        Fetch news articles from NewsAPI for financial topics.
+        Fetch news articles from NewsAPI for both tickers and sectors.
+        Returns tuple of (ticker_news_df, sector_news_df)
         """
         print("Starting NewsAPI data extraction...")
         
-        # Execute the main news fetching logic
-        df = fetch_news_data.main()
+        # Execute the main news fetching logic - returns tuple of 2 dataframes
+        ticker_news_df, sector_news_df = fetch_news_data.main()
         
-        if df is not None and not df.empty:
-            print(f"Successfully fetched {len(df)} news articles")
-            return df
+        if ticker_news_df is not None and not ticker_news_df.empty:
+            print(f"Successfully fetched {len(ticker_news_df)} ticker news articles")
         else:
-            raise ValueError("Failed to fetch news data from NewsAPI")
+            print("⚠️ No ticker news articles fetched")
+            
+        if sector_news_df is not None and not sector_news_df.empty:
+            print(f"Successfully fetched {len(sector_news_df)} sector news articles")
+        else:
+            print("⚠️ No sector news articles fetched")
+        
+        return ticker_news_df, sector_news_df  # Return tuple
     
     @task(task_id='transform_sentiment')
-    def transform_data(news_df, market_df):
+    def transform_sentiment_data(ticker_news_df, market_df):
         """
-        Reads market_data.csv + news_data.csv,
-        computes sentiment, compares with price change,
-        and uploads to Postgres.
+        Transform ticker news: compute sentiment and compare with price change.
         """
-        print("🔄 Starting data transformation (sentiment + price correlation)...")
-        final_df = transform_sentiment.main(news_df, market_df)
-        # print("✅ Transformation and upload to Postgres completed successfully.")
+        print("🔄 Starting sentiment transformation (sentiment + price correlation)...")
+        final_df = transform_sentiment.main(market_df, ticker_news_df)  # Correct order: market first, news second
         return final_df
     
-    @task(task_id='load_to_supabase')
-    def load_data(final_df):
-        print("🚀 Loading data to Supabase Postgres...")
+    @task(task_id='transform_articles')
+    def transform_article_data(sector_news_df):
+        """
+        Transform sector news articles: generate article_id, convert datetime to date.
+        """
+        print("🔄 Starting article transformation...")
+        transformed_articles = transform_article.main(sector_news_df)
+        return transformed_articles
+    
+    @task(task_id='load_sentiment_to_supabase')
+    def load_sentiment_data(final_df):
+        print("🚀 Loading sentiment data to Supabase Postgres...")
         
         # Drop 'id' column if it exists - let database auto-generate it
         if 'id' in final_df.columns:
@@ -125,7 +139,15 @@ def financial_data_pipeline():
             print("ℹ️  Dropped 'id' column - database will auto-generate it")
         
         bulk_insert_dataframe(final_df, table="finance.old_sentiment")
-        print("✅ Load complete.")
+        print("✅ Sentiment load complete.")
+    
+    @task(task_id='load_articles_to_supabase')
+    def load_article_data(articles_df):
+        print("🚀 Loading article data to Supabase Postgres...")
+
+        
+        bulk_insert_dataframe(articles_df, table="finance.articles")
+        print("✅ Articles load complete.")
     # Define task execution order
     # 1. First, set up database schema
     schema_setup = setup_schema()
@@ -133,16 +155,37 @@ def financial_data_pipeline():
     # 2. Populate reference data (sectors & tickers)
     ref_data = populate_hardcoded_data()
     
-    # 3. Then extract data in parallel (both depend on reference data being ready)
+    # 3. Extract data in parallel (both depend on reference data being ready)
     market_df = extract_market_data()
-    news_df = fetch_news_articles()
+    news_data_tuple = fetch_news_articles()  # Returns tuple: (ticker_news_df, sector_news_df)
     
-    # 4. Transform and load
-    final_df = transform_data(market_df, news_df)
-    load_result = load_data(final_df)
+    # 4. Create unpacking tasks to extract individual dataframes from tuple
+    @task(task_id='unpack_ticker_news')
+    def unpack_ticker_news(news_tuple):
+        """Extract ticker news from the tuple"""
+        return news_tuple[0]
     
-    # Set dependencies: schema setup -> populate reference data -> extraction
-    schema_setup >> ref_data >> [market_df, news_df]
+    @task(task_id='unpack_sector_news')
+    def unpack_sector_news(news_tuple):
+        """Extract sector news from the tuple"""
+        return news_tuple[1]
+    
+    ticker_news_df = unpack_ticker_news(news_data_tuple)
+    sector_news_df = unpack_sector_news(news_data_tuple)
+    
+    # 5. Transform data in parallel
+    # Path A: Ticker news + market data -> sentiment analysis
+    sentiment_df = transform_sentiment_data(ticker_news_df, market_df)
+    
+    # Path B: Sector news -> article transformation
+    articles_df = transform_article_data(sector_news_df)
+    
+    # 6. Load transformed data to database in parallel
+    sentiment_load = load_sentiment_data(sentiment_df)
+    articles_load = load_article_data(articles_df)
+    
+    # Set dependencies: schema setup -> populate reference data -> extraction -> unpack -> transform -> load
+    schema_setup >> ref_data >> [market_df, news_data_tuple]
 
 
 # Instantiate the DAG

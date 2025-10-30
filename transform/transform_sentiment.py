@@ -1,6 +1,6 @@
 """
 Final version (content-only, with default positive sentiment):
-Aggregates article-level sentiment per topic (ticker),
+Aggregates article-level sentiment per ticker,
 ignores invalid or missing content,
 and defaults to 'positive' if no sentiment is found.
 """
@@ -47,24 +47,26 @@ def load_data():
 
 
 # ---------------------------------------------------------------------
-# Step 2: Compute sentiment per topic (ticker)
+# Step 2: Compute sentiment per ticker
 # ---------------------------------------------------------------------
 def compute_daily_sentiment(news_df: pd.DataFrame):
     # Normalize to expected column
-    if "topic" not in news_df.columns:
+    if "ticker" not in news_df.columns:
         if "stock_ticker" in news_df.columns:
-            news_df = news_df.rename(columns={"stock_ticker": "topic"})
+            news_df = news_df.rename(columns={"stock_ticker": "ticker"})
         elif "symbol" in news_df.columns:
-            news_df = news_df.rename(columns={"symbol": "topic"})
+            news_df = news_df.rename(columns={"symbol": "ticker"})
+        elif "topic" in news_df.columns:
+            news_df = news_df.rename(columns={"topic": "ticker"})
         else:
-            raise ValueError("❌ No 'topic', 'symbol', or 'stock_ticker' column found in news_df")
+            raise ValueError("❌ No 'ticker', 'topic', 'symbol', or 'stock_ticker' column found in news_df")
 
     results = []
-    grouped = news_df.groupby("topic")
+    grouped = news_df.groupby("ticker")
 
-    for topic, group in grouped:
+    for ticker, group in grouped:
         sentiments = []
-        print(f"\n📰 Processing topic: {topic} ({len(group)} articles)")
+        print(f"\n📰 Processing ticker: {ticker} ({len(group)} articles)")
 
         for _, row in group.iterrows():
             content = str(row.get("content", "")).strip()
@@ -78,7 +80,7 @@ def compute_daily_sentiment(news_df: pd.DataFrame):
                 if label in ["positive", "negative"]:
                     sentiments.append(label)
             except Exception as e:
-                print(f"⚠️ Error processing article for {topic}: {e}")
+                print(f"⚠️ Error processing article for {ticker}: {e}")
                 continue
 
         # Majority vote — if no valid sentiment found, default to 'positive'
@@ -94,8 +96,8 @@ def compute_daily_sentiment(news_df: pd.DataFrame):
             else:
                 sentiment_label = "positive"  # tie → positive
 
-        results.append({"symbol": topic, "sentiment_from_yesterday": sentiment_label})
-        print(f"✅ {topic} → {sentiment_label.upper()} ({len(sentiments)} valid articles)")
+        results.append({"symbol": ticker, "sentiment_from_yesterday": sentiment_label})
+        print(f"✅ {ticker} → {sentiment_label.upper()} ({len(sentiments)} valid articles)")
 
     df_results = pd.DataFrame(results)
     print("\n✅ Sentiment summary:")
@@ -159,21 +161,6 @@ def merge_sentiment_and_prices(sentiment_df, price_df):
     print("\n🧾 Final transformed DataFrame:")
     print(final_df)
     return final_df
-
-
-# ---------------------------------------------------------------------
-# Step 5: Upload to Postgres
-# ---------------------------------------------------------------------
-# def upload_to_postgres(df):
-#    engine = create_engine(DB_CONN_STR)
-#    df.to_sql(
-#        name="sentiment",
-#        schema="finance",
-#        con=engine,
-#        if_exists="append",
-#        index=False,
-#    )
-#   print(f"✅ Uploaded {len(df)} rows to finance.sentiment")
 
 
 # ---------------------------------------------------------------------
