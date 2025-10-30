@@ -24,6 +24,8 @@ from extract import fetch_yf_data
 from extract import fetch_news_data
 from transform import transform_sentiment
 
+from load.load_data import bulk_insert_dataframe, setup_database_schema, hardcode_tickers_and_sectors
+
 @dag(
     dag_id='financial_data_pipeline',
     start_date=datetime(2023, 10, 26),
@@ -48,9 +50,18 @@ def financial_data_pipeline():
         This ensures the database is ready before any data loading.
         """
         print("🏗️  Setting up database schemas...")
-        from load.load_data import setup_database_schema
+        
         setup_database_schema()
         print("✅ Database schema setup complete")
+    
+    @task(task_id='populate_hardcoded_data')
+    def populate_hardcoded_data():
+        """
+        Populate reference data like sectors and tickers that should exist in the database.
+        """
+        print("📊 Populating hardcoded data (sectors & tickers)...")
+        hardcode_tickers_and_sectors()
+        print("✅ hardcoded data populated")
     
     @task(task_id='extract_yfinance')
     def extract_market_data():
@@ -107,7 +118,6 @@ def financial_data_pipeline():
     @task(task_id='load_to_supabase')
     def load_data(final_df):
         print("🚀 Loading data to Supabase Postgres...")
-        from load.load_data import bulk_insert_dataframe
         
         # Drop 'id' column if it exists - let database auto-generate it
         if 'id' in final_df.columns:
@@ -120,16 +130,19 @@ def financial_data_pipeline():
     # 1. First, set up database schema
     schema_setup = setup_schema()
     
-    # 2. Then extract data in parallel (both depend on schema being ready)
+    # 2. Populate reference data (sectors & tickers)
+    ref_data = populate_hardcoded_data()
+    
+    # 3. Then extract data in parallel (both depend on reference data being ready)
     market_df = extract_market_data()
     news_df = fetch_news_articles()
     
-    # 3. Transform and load
+    # 4. Transform and load
     final_df = transform_data(market_df, news_df)
     load_result = load_data(final_df)
     
-    # Set dependencies: schema setup must complete before extraction
-    schema_setup >> [market_df, news_df]
+    # Set dependencies: schema setup -> populate reference data -> extraction
+    schema_setup >> ref_data >> [market_df, news_df]
 
 
 # Instantiate the DAG

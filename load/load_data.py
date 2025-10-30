@@ -179,3 +179,43 @@ def bulk_insert_dataframe(
         conn.execute(text(upsert_sql))
 
     return len(df)
+
+def hardcode_tickers_and_sectors(engine: Optional[Engine] = None) -> None:
+    """
+    Insert the 'technology' sector and key tech tickers (AAPL, MSFT, AMZN, GOOGL, META)
+    if they don't already exist in the database.
+    """
+    if engine is None:
+        engine = _make_engine_from_env()
+    
+    with engine.begin() as conn:
+        # 1. Insert 'technology' sector if it doesn't exist
+        conn.execute(text("""
+            INSERT INTO finance.sectors (sector_name)
+            VALUES ('technology')
+            ON CONFLICT (sector_name) DO NOTHING
+        """))
+        
+        # 2. Get the sector_id for 'technology'
+        result = conn.execute(text("""
+            SELECT sector_id FROM finance.sectors WHERE sector_name = 'technology'
+        """))
+        sector_id = result.fetchone()[0]
+        
+        # 3. Insert tickers with their company names if they don't exist
+        tickers_data = [
+            ('AAPL', 'Apple Inc.'),
+            ('MSFT', 'Microsoft Corporation'),
+            ('AMZN', 'Amazon.com Inc.'),
+            ('GOOGL', 'Alphabet Inc.'),
+            ('META', 'Meta Platforms Inc.')
+        ]
+        
+        for ticker_symbol, company_name in tickers_data:
+            conn.execute(text("""
+                INSERT INTO finance.tickers (ticker_symbol, company_name, sector_id)
+                VALUES (:ticker, :company, :sector_id)
+                ON CONFLICT (ticker_symbol) DO NOTHING
+            """), {"ticker": ticker_symbol, "company": company_name, "sector_id": sector_id})
+        
+        print(f"✅ Technology sector and tickers (AAPL, MSFT, AMZN, GOOGL, META) ensured in database")
