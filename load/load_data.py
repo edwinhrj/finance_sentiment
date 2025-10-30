@@ -39,6 +39,95 @@ def _parse_table(table: str) -> tuple[str, str]:
         return parts[0], parts[1]
     return "public", parts[0]
 
+def setup_database_schema(engine: Optional[Engine] = None) -> None:
+    """
+    Create all necessary schemas and tables if they don't exist.
+    Respects foreign key relationships by creating tables in the correct order.
+    """
+    if engine is None:
+        engine = _make_engine_from_env()
+    
+    # Ensure finance schema exists
+    _ensure_schema(engine, "finance")
+    
+    with engine.begin() as conn:
+        # Create tables in order respecting FK dependencies
+        
+        # 1. sectors (no dependencies)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS finance.sectors (
+                sector_id SERIAL PRIMARY KEY,
+                sector_name VARCHAR(255) UNIQUE NOT NULL
+            )
+        """))
+        
+        # 2. reliability (no dependencies)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS finance.reliability (
+                reliability_id SERIAL PRIMARY KEY,
+                source_name VARCHAR(255) UNIQUE NOT NULL,
+                bias_score FLOAT,
+                factual_accuracy FLOAT,
+                reliability_rating VARCHAR(50),
+                last_verified_date DATE
+            )
+        """))
+        
+        # 3. tickers (depends on sectors)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS finance.tickers (
+                ticker_id SERIAL PRIMARY KEY,
+                ticker_symbol VARCHAR(20) UNIQUE NOT NULL,
+                company_name VARCHAR(255),
+                sector_id INTEGER REFERENCES finance.sectors(sector_id)
+            )
+        """))
+        
+        # 4. articles (depends on sectors)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS finance.articles (
+                article_id SERIAL PRIMARY KEY,
+                sector_id INTEGER REFERENCES finance.sectors(sector_id),
+                title TEXT,
+                content TEXT,
+                date DATE,
+                source_url TEXT UNIQUE,
+                author TEXT,
+                source_name VARCHAR(255),
+                impact_score FLOAT,
+                summary TEXT,
+                embedding_vector JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        
+        # 5. sentiment (depends on articles)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS finance.sentiment (
+                sentiment_id SERIAL PRIMARY KEY,
+                article_id INTEGER REFERENCES finance.articles(article_id),
+                sentiment_score FLOAT,
+                sentiment_confidence FLOAT,
+                wordcloud_json JSONB,
+                entity_tags JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        
+        # 6. old_sentiment (no dependencies)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS finance.old_sentiment (
+                id SERIAL PRIMARY KEY,
+                stock_ticker TEXT,
+                sentiment_from_yesterday BOOLEAN,
+                price_change_in_percentage FLOAT,
+                match BOOLEAN,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        
+        print("✅ All database schemas and tables created successfully")
+
 def bulk_insert_dataframe(
     df: pd.DataFrame,
     table: str,
