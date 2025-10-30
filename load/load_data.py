@@ -10,7 +10,7 @@ def _make_engine_from_env() -> Engine:
     def first(*keys, default=None):
         for k in keys:
             v = os.getenv(k)
-            if v:
+            if v: #pull
                 return v
         return default
 
