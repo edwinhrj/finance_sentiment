@@ -41,6 +41,17 @@ def financial_data_pipeline():
     DAG for extracting financial market data and news articles in parallel.
     """
     
+    @task(task_id='setup_database_schema')
+    def setup_schema():
+        """
+        Create all database schemas and tables if they don't exist.
+        This ensures the database is ready before any data loading.
+        """
+        print("🏗️  Setting up database schemas...")
+        from load.load_data import setup_database_schema
+        setup_database_schema()
+        print("✅ Database schema setup complete")
+    
     @task(task_id='extract_yfinance')
     def extract_market_data():
         """
@@ -97,14 +108,28 @@ def financial_data_pipeline():
     def load_data(final_df):
         print("🚀 Loading data to Supabase Postgres...")
         from load.load_data import bulk_insert_dataframe
-        bulk_insert_dataframe(final_df, table="finance.sentiment")  # adjust table name
+        
+        # Drop 'id' column if it exists - let database auto-generate it
+        if 'id' in final_df.columns:
+            final_df = final_df.drop(columns=['id'])
+            print("ℹ️  Dropped 'id' column - database will auto-generate it")
+        
+        bulk_insert_dataframe(final_df, table="finance.old_sentiment")
         print("✅ Load complete.")
-    # Define parallel task execution
-    # Both tasks run independently and in parallel
+    # Define task execution order
+    # 1. First, set up database schema
+    schema_setup = setup_schema()
+    
+    # 2. Then extract data in parallel (both depend on schema being ready)
     market_df = extract_market_data()
     news_df = fetch_news_articles()
+    
+    # 3. Transform and load
     final_df = transform_data(market_df, news_df)
-    load_data(final_df)
+    load_result = load_data(final_df)
+    
+    # Set dependencies: schema setup must complete before extraction
+    schema_setup >> [market_df, news_df]
 
 
 # Instantiate the DAG
