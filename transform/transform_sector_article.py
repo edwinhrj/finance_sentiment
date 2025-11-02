@@ -164,8 +164,8 @@ def main(sector_news_df: pd.DataFrame) -> pd.DataFrame:
         print(f"  - Article {idx}: '{row['title'][:50]}...' → Impact Score: {row['impact_score']:+.4f}")
     
     return transformed_df
-
-
+    
+    
 if __name__ == "__main__":
     # For testing - load the sector news CSV if it exists
     import os
@@ -183,4 +183,5 @@ if __name__ == "__main__":
         print(f"\n✅ Saved transformed data to {output_path}")
     else:
         print("❌ sector_news_data.csv not found. Run fetch_news_data.py first.")
+
 

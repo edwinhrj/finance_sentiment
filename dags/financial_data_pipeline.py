@@ -22,8 +22,8 @@ sys.path.insert(0, "/usr/local/airflow")
 
 from extract import fetch_yf_data
 from extract import fetch_news_data
-from transform import transform_sentiment
-from transform import transform_article
+from transform import transform_ticker_article as transform_ticker_article_module
+from transform import transform_sector_article as transform_sector_article_module
 
 from load.load_data import bulk_insert_dataframe, setup_database_schema, hardcode_tickers_and_sectors
 
@@ -111,22 +111,22 @@ def financial_data_pipeline():
         
         return ticker_news_df, sector_news_df  # Return tuple
     
-    @task(task_id='transform_sentiment')
-    def transform_sentiment_data(ticker_news_df, market_df):
+    @task(task_id='transform_ticker_articles')
+    def transform_ticker_article(ticker_news_df, market_df):
         """
         Transform ticker news: compute sentiment and compare with price change.
         """
         print("🔄 Starting sentiment transformation (sentiment + price correlation)...")
-        final_df = transform_sentiment.main(market_df, ticker_news_df)  # Correct order: market first, news second
+        final_df = transform_ticker_article_module.main(market_df, ticker_news_df)  # Correct order: market first, news second
         return final_df
     
-    @task(task_id='transform_articles')
-    def transform_article_data(sector_news_df):
+    @task(task_id='transform_sector_articles')
+    def transform_sector_article(sector_news_df):
         """
         Transform sector news articles: generate article_id, convert datetime to date.
         """
         print("🔄 Starting article transformation...")
-        transformed_articles = transform_article.main(sector_news_df)
+        transformed_articles = transform_sector_article_module.main(sector_news_df)
         return transformed_articles
     
     @task(task_id='load_sentiment_to_supabase')
@@ -175,10 +175,10 @@ def financial_data_pipeline():
     
     # 5. Transform data in parallel
     # Path A: Ticker news + market data -> sentiment analysis
-    sentiment_df = transform_sentiment_data(ticker_news_df, market_df)
+    sentiment_df = transform_ticker_article(ticker_news_df, market_df)
     
     # Path B: Sector news -> article transformation
-    articles_df = transform_article_data(sector_news_df)
+    articles_df = transform_sector_article(sector_news_df)
     
     # 6. Load transformed data to database in parallel
     sentiment_load = load_sentiment_data(sentiment_df)

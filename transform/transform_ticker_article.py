@@ -167,7 +167,7 @@ def merge_sentiment_and_prices(sentiment_df, price_df):
 # Main entry point
 # ---------------------------------------------------------------------
 def main(market_df, news_df):
-    print("🔄 Starting transform_sentiment.main()...")
+    print("🔄 Starting transform_ticker_article.main()...")
     # market_df, news_df = load_data()
     sentiment_df = compute_daily_sentiment(news_df)
     price_df = compute_price_change(market_df)
@@ -190,3 +190,5 @@ if __name__ == "__main__":
     print("\n✅ Preview of transformed output:")
     print(final_df.head())
     print(f"\n✅ Saved CSV to: {os.path.abspath(out_path)}")
+
+

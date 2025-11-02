@@ -6,7 +6,7 @@ Added FinBERT sentiment analysis to calculate `impact_score` for each sector new
 
 ## What Was Implemented
 
-### 1. **FinBERT Model Integration** (`transform/transform_article.py`)
+### 1. **FinBERT Model Integration** (`transform/transform_sector_article.py`)
 
 - Model: `ProsusAI/finbert` - specifically trained for financial text sentiment
 - Cached pipeline initialization for performance (`@lru_cache`)
@@ -25,9 +25,9 @@ Added FinBERT sentiment analysis to calculate `impact_score` for each sector new
 ### 3. **Data Flow**
 
 ```
-fetch_news_data → transform_article → load_data
-      ↓                    ↓               ↓
-sector_news_df    + impact_score     Supabase DB
+fetch_news_data → transform_sector_article → load_data
+      ↓                          ↓               ↓
+sector_news_df            + impact_score     Supabase DB
 ```
 
 ### 4. **Database Schema**
@@ -88,7 +88,7 @@ pip install transformers torch
 python extract/fetch_news_data.py
 
 # 3. Run transformation with FinBERT sentiment analysis
-python transform/transform_article.py
+python transform/transform_sector_article.py
 
 # 4. Check output
 cat transformed_articles.csv
@@ -98,8 +98,8 @@ cat transformed_articles.csv
 
 The FinBERT integration is automatically used in the Airflow pipeline:
 
-- **Task**: `transform_articles`
-- **Function**: `transform_article.main(sector_news_df)`
+- **Task**: `transform_sector_articles`
+- **Function**: `transform_sector_article.main(sector_news_df)`
 - **Next Step**: `load_articles_to_supabase` → loads to `finance.articles` table
 
 No changes needed to the DAG - it already calls the updated transformation function.
