@@ -57,19 +57,18 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.sectors (
                 sector_id SERIAL PRIMARY KEY,
-                sector_name VARCHAR(255) UNIQUE NOT NULL
+                sector_name VARCHAR UNIQUE NOT NULL
             )
         """))
         
-        # 2. reliability (no dependencies)
+        # 2. sources (Source reliability master list) (no dependencies)
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS finance.reliability (
-                reliability_id SERIAL PRIMARY KEY,
-                source_name VARCHAR(255) UNIQUE NOT NULL,
-                bias_score FLOAT,
-                factual_accuracy FLOAT,
-                reliability_rating VARCHAR(50),
-                last_verified_date DATE
+            CREATE TABLE IF NOT EXISTS finance.sources (
+                source_id SERIAL PRIMARY KEY,
+                source_name VARCHAR UNIQUE NOT NULL,
+                credibility_score FLOAT,
+                rating VARCHAR,
+                last_verified DATE
             )
         """))
         
@@ -77,42 +76,41 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.tickers (
                 ticker_id SERIAL PRIMARY KEY,
-                ticker_symbol VARCHAR(20) UNIQUE NOT NULL,
-                company_name VARCHAR(255),
+                ticker_symbol TEXT UNIQUE NOT NULL,
                 sector_id INTEGER REFERENCES finance.sectors(sector_id)
             )
         """))
         
-        # 4. articles (depends on sectors)
+        # 4. sector_article (depends on sectors)
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS finance.articles (
-                article_id SERIAL PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS finance.sector_article (
+                sector_article_id SERIAL PRIMARY KEY,
                 sector_id INTEGER REFERENCES finance.sectors(sector_id),
                 title TEXT,
                 content TEXT,
                 date_published DATE,
                 source_url TEXT UNIQUE,
                 author TEXT,
-                source_name VARCHAR(255),
+                source_name VARCHAR,
                 impact_score FLOAT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT NOW()
             )
         """))
         
-        # 5. sentiment (depends on articles)
+        # 5. ticker_article (depends on tickers)
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS finance.sentiment (
-                sentiment_id SERIAL PRIMARY KEY,
-                article_id INTEGER REFERENCES finance.articles(article_id),
-                sentiment_score FLOAT,
-                sentiment_confidence FLOAT,
-                wordcloud_json JSONB,
-                entity_tags JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS finance.ticker_article (
+                ticker_article_id SERIAL PRIMARY KEY,
+                ticker_id INTEGER REFERENCES finance.tickers(ticker_id),
+                sentiment_from_yesterday BOOLEAN,
+                price_change_in_percentage FLOAT,
+                match BOOLEAN,
+                created_at TIMESTAMP,
+                wordcloud_json JSONB
             )
         """))
         
-        # 6. old_sentiment (no dependencies)
+        # 6. old_sentiment (no dependencies) - preserved
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.old_sentiment (
                 id SERIAL PRIMARY KEY,
@@ -124,7 +122,7 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
             )
         """))
         
-        print("✅ All database schemas and tables created successfully")
+        print("✅ All database schemas and tables created successfully (updated schema)")
 
 def bulk_insert_dataframe(
     df: pd.DataFrame,
@@ -200,20 +198,16 @@ def hardcode_tickers_and_sectors(engine: Optional[Engine] = None) -> None:
         """))
         sector_id = result.fetchone()[0]
         
-        # 3. Insert tickers with their company names if they don't exist
+        # 3. Insert tickers if they don't exist
         tickers_data = [
-            ('AAPL', 'Apple Inc.'),
-            ('MSFT', 'Microsoft Corporation'),
-            ('AMZN', 'Amazon.com Inc.'),
-            ('GOOGL', 'Alphabet Inc.'),
-            ('META', 'Meta Platforms Inc.')
+            'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META'
         ]
         
-        for ticker_symbol, company_name in tickers_data:
+        for ticker_symbol in tickers_data:
             conn.execute(text("""
-                INSERT INTO finance.tickers (ticker_symbol, company_name, sector_id)
-                VALUES (:ticker, :company, :sector_id)
+                INSERT INTO finance.tickers (ticker_symbol, sector_id)
+                VALUES (:ticker, :sector_id)
                 ON CONFLICT (ticker_symbol) DO NOTHING
-            """), {"ticker": ticker_symbol, "company": company_name, "sector_id": sector_id})
+            """), {"ticker": ticker_symbol, "sector_id": sector_id})
         
         print(f"✅ Technology sector and tickers (AAPL, MSFT, AMZN, GOOGL, META) ensured in database")

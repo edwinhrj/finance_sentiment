@@ -146,7 +146,7 @@ def financial_data_pipeline():
         print("🚀 Loading article data to Supabase Postgres...")
 
         
-        bulk_insert_dataframe(articles_df, table="finance.articles")
+        bulk_insert_dataframe(articles_df, table="finance.sector_article")
         print("✅ Articles load complete.")
     # Define task execution order
     # 1. First, set up database schema
