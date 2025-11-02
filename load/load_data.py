@@ -97,19 +97,6 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
             )
         """))
         
-        # 5. ticker_article (depends on tickers)
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS finance.ticker_article (
-                ticker_article_id SERIAL PRIMARY KEY,
-                ticker_id INTEGER REFERENCES finance.tickers(ticker_id),
-                sentiment_from_yesterday BOOLEAN,
-                price_change_in_percentage FLOAT,
-                match BOOLEAN,
-                created_at TIMESTAMP,
-                wordcloud_json JSONB
-            )
-        """))
-        
         # 6. old_sentiment (no dependencies) - preserved
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.old_sentiment (
@@ -118,7 +105,8 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
                 sentiment_from_yesterday BOOLEAN,
                 price_change_in_percentage FLOAT,
                 match BOOLEAN,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                wordcloud_json JSONB
             )
         """))
         

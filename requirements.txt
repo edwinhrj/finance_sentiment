@@ -17,6 +17,7 @@ streamlit>=1.35.0
 transformers>=4.40.0
 vaderSentiment>=3.3.2
 torch>=2.2.0
+nltk>=3.8.1   
 
 # Additional useful libraries
 matplotlib>=3.8.0

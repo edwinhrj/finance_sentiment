@@ -1,8 +1,9 @@
 """
-Final version (content-only, with default positive sentiment):
-Aggregates article-level sentiment per ticker,
-ignores invalid or missing content,
-and defaults to 'positive' if no sentiment is found.
+Ticker sentiment + wordcloud transform
+- Runs per ticker
+- Majority vote sentiment
+- Wordcloud based on all text per ticker
+- Optimized lazy imports for Airflow
 """
 
 from functools import lru_cache
@@ -11,109 +12,115 @@ import numpy as np
 from datetime import datetime
 import os
 import pytz
-import uuid
-from sqlalchemy import create_engine
-from transformers import pipeline
+from collections import Counter
+import re
+import json
 
 # ---------------------------------------------------------------------
-# Config
+# File paths (local testing)
 # ---------------------------------------------------------------------
 MARKET_CSV = os.getenv("MARKET_CSV", "market_data.csv")
 NEWS_CSV = os.getenv("NEWS_CSV", "news_data.csv")
 
-DB_CONN_STR = (
-    "postgresql://postgres.zjtwtcnlrdkbtibuwlfd:"
-    "zwr5h4UJDpN08AYj@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres"
-    "?sslmode=require"
-)
+# -----------------------------
+# Stopwords (lazy)
+# -----------------------------
+def ensure_stopwords():
+    import nltk
+    try:
+        nltk.data.find("corpora/stopwords")
+    except LookupError:
+        nltk.download("stopwords", quiet=True)
 
+    from nltk.corpus import stopwords
+    return set(stopwords.words("english"))
+
+def make_wordcloud(texts):
+    STOP_WORDS = ensure_stopwords()
+    full_text = " ".join([str(t) for t in texts if isinstance(t, str)])
+    cleaned = re.sub(r"[^a-zA-Z\s]", " ", full_text.lower())
+    tokens = [t for t in cleaned.split() if t not in STOP_WORDS and len(t) > 2]
+    freq = dict(Counter(tokens).most_common(60))
+    return json.dumps(freq)
+
+# -----------------------------
+# Sentiment model (lazy load)
+# -----------------------------
 @lru_cache(maxsize=1)
 def get_sentiment_pipeline():
-    from transformers import pipeline  # lazy import
+    from transformers import pipeline   # ✅ lazy import (Airflow-safe)
     return pipeline(
         "sentiment-analysis",
         model="distilbert/distilbert-base-uncased-finetuned-sst-2-english",
         revision="714eb0f",
     )
 
-# ---------------------------------------------------------------------
-# Step 1: Load data
-# ---------------------------------------------------------------------
+# -----------------------------
+# Load local CSVs
+# -----------------------------
 def load_data():
     market_df = pd.read_csv(MARKET_CSV)
     news_df = pd.read_csv(NEWS_CSV)
     print(f"📊 Loaded {len(market_df)} market rows, {len(news_df)} news rows")
     return market_df, news_df
 
-
-# ---------------------------------------------------------------------
-# Step 2: Compute sentiment per ticker
-# ---------------------------------------------------------------------
+# -----------------------------
+# Compute ticker sentiment + wordcloud
+# -----------------------------
 def compute_daily_sentiment(news_df: pd.DataFrame):
-    # Normalize to expected column
+
+    # Normalize column name
+    rename_map = {"stock_ticker": "ticker", "symbol": "ticker", "topic": "ticker"}
+    for col in rename_map:
+        if col in news_df.columns:
+            news_df = news_df.rename(columns={col: "ticker"})
+            break
+
     if "ticker" not in news_df.columns:
-        if "stock_ticker" in news_df.columns:
-            news_df = news_df.rename(columns={"stock_ticker": "ticker"})
-        elif "symbol" in news_df.columns:
-            news_df = news_df.rename(columns={"symbol": "ticker"})
-        elif "topic" in news_df.columns:
-            news_df = news_df.rename(columns={"topic": "ticker"})
-        else:
-            raise ValueError("❌ No 'ticker', 'topic', 'symbol', or 'stock_ticker' column found in news_df")
+        raise ValueError("❌ No ticker column found")
 
     results = []
     grouped = news_df.groupby("ticker")
 
     for ticker, group in grouped:
         sentiments = []
-        print(f"\n📰 Processing ticker: {ticker} ({len(group)} articles)")
+        contents = group["content"].dropna().astype(str).tolist()
+        wc_json = make_wordcloud(contents)
 
         for _, row in group.iterrows():
-            content = str(row.get("content", "")).strip()
-            if not content or content.lower() in ["nan", "none", "null"]:
+            text = str(row.get("content", "")).strip()
+            if not text or text.lower() in ["none", "null", "nan"]:
                 continue
 
             try:
-                nlp = get_sentiment_pipeline()
-                out = nlp(content[:4000])[0]
+                model = get_sentiment_pipeline()
+                out = model(text[:4000])[0]
                 label = out.get("label", "").lower()
                 if label in ["positive", "negative"]:
                     sentiments.append(label)
-            except Exception as e:
-                print(f"⚠️ Error processing article for {ticker}: {e}")
+            except:
                 continue
 
-        # Majority vote — if no valid sentiment found, default to 'positive'
-        if len(sentiments) == 0:
-            sentiment_label = "positive"
+        if not sentiments:
+            sentiment = "positive"
         else:
-            pos = sentiments.count("positive")
-            neg = sentiments.count("negative")
-            if pos > neg:
-                sentiment_label = "positive"
-            elif neg > pos:
-                sentiment_label = "negative"
-            else:
-                sentiment_label = "positive"  # tie → positive
+            sentiment = "positive" if sentiments.count("positive") >= sentiments.count("negative") else "negative"
 
-        results.append({"symbol": ticker, "sentiment_from_yesterday": sentiment_label})
-        print(f"✅ {ticker} → {sentiment_label.upper()} ({len(sentiments)} valid articles)")
+        results.append({
+            "symbol": ticker,
+            "sentiment_from_yesterday": sentiment,
+            "wordcloud_json": wc_json
+        })
 
-    df_results = pd.DataFrame(results)
-    print("\n✅ Sentiment summary:")
-    print(df_results)
-    return df_results
+        print(f"✅ {ticker}: {sentiment.upper()} | {len(json.loads(wc_json))} tokens")
 
+    return pd.DataFrame(results)
 
-# ---------------------------------------------------------------------
-# Step 3: Compute price change and trend
-# ---------------------------------------------------------------------
+# -----------------------------
+# Compute price change
+# -----------------------------
 def compute_price_change(market_df: pd.DataFrame):
-    print("📢 market_df columns BEFORE normalization:", market_df.columns.tolist())
-
     market_df = market_df.rename(columns=str.lower)
-
-    print("📢 market_df columns AFTER normalization:", market_df.columns.tolist())
     market_df["price_change_in_percentage"] = (
         (market_df["close"] - market_df["open"]) / market_df["open"] * 100
     )
@@ -122,19 +129,16 @@ def compute_price_change(market_df: pd.DataFrame):
     )
     return market_df[["symbol", "price_change_in_percentage", "price_trend"]]
 
-
-# ---------------------------------------------------------------------
-# Step 4: Merge and align with DB schema
-# ---------------------------------------------------------------------
+# -----------------------------
+# Merge for finance.old_sentiment
+# -----------------------------
 def merge_sentiment_and_prices(sentiment_df, price_df):
     merged = pd.merge(sentiment_df, price_df, on="symbol", how="left")
 
     merged["sentiment_from_yesterday"] = (
-        merged["sentiment_from_yesterday"]
-        .astype(str)
-        .str.lower()
-        .map({"positive": True, "negative": False})
-        .fillna(True)  # fallback to True if missing
+        merged["sentiment_from_yesterday"].str.lower().map(
+            {"positive": True, "negative": False}
+        ).fillna(True)
     )
 
     merged["match"] = (
@@ -142,53 +146,28 @@ def merge_sentiment_and_prices(sentiment_df, price_df):
         | (~merged["sentiment_from_yesterday"] & (merged["price_trend"] == "negative"))
     )
 
-    sg_time = datetime.now(pytz.timezone("Asia/Singapore"))
-    merged["created_at"] = sg_time
-    merged["id"] = [str(uuid.uuid4()) for _ in range(len(merged))]
+    merged["created_at"] = datetime.now(pytz.timezone("Asia/Singapore"))
     merged["stock_ticker"] = merged["symbol"]
 
-    final_df = merged[
-        [
-            "id",
-            "stock_ticker",
-            "sentiment_from_yesterday",
-            "price_change_in_percentage",
-            "match",
-            "created_at",
-        ]
+    return merged[
+        ["stock_ticker", "sentiment_from_yesterday", "price_change_in_percentage", "match", "created_at", "wordcloud_json"]
     ]
 
-    print("\n🧾 Final transformed DataFrame:")
-    print(final_df)
-    return final_df
-
-
-# ---------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------
+# -----------------------------
+# Main
+# -----------------------------
 def main(market_df, news_df):
-    print("🔄 Starting transform_ticker_article.main()...")
-    # market_df, news_df = load_data()
     sentiment_df = compute_daily_sentiment(news_df)
     price_df = compute_price_change(market_df)
     final_df = merge_sentiment_and_prices(sentiment_df, price_df)
-    # upload_to_postgres(final_df)
-    print("🏁 Transformation completed successfully.")
     return final_df
 
 if __name__ == "__main__":
-    # Load from local CSVs in the project root (can be overridden by env vars)
     market_df, news_df = load_data()
     final_df = main(market_df, news_df)
 
-    # Preview a few rows and save to include/data/final_output.csv
-    from pathlib import Path
-    Path("include/data").mkdir(parents=True, exist_ok=True)
+    os.makedirs("include/data", exist_ok=True)
     out_path = "include/data/final_output.csv"
     final_df.to_csv(out_path, index=False)
 
-    print("\n✅ Preview of transformed output:")
-    print(final_df.head())
-    print(f"\n✅ Saved CSV to: {os.path.abspath(out_path)}")
-
-
+    print("✅ Saved:", os.path.abspath(out_path))
