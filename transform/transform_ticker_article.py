@@ -13,7 +13,7 @@ import os
 import pytz
 import uuid
 from sqlalchemy import create_engine
-from transformers import pipeline
+# transformers imported lazily in get_sentiment_pipeline()
 
 # ---------------------------------------------------------------------
 # Config

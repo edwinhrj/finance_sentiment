@@ -8,8 +8,7 @@ Transform sector news articles:
 import pandas as pd
 from datetime import datetime
 from functools import lru_cache
-from transformers import pipeline
-import torch
+# transformers and torch imported lazily in get_finbert_pipeline()
 
 
 @lru_cache(maxsize=1)
@@ -18,6 +17,10 @@ def get_finbert_pipeline():
     Initialize and cache the FinBERT sentiment analysis pipeline.
     FinBERT is specifically trained for financial text sentiment analysis.
     """
+    # Lazy import to avoid slow imports during DAG parsing
+    from transformers import pipeline
+    import torch
+    
     print("🤖 Loading FinBERT model...")
     return pipeline(
         "sentiment-analysis",

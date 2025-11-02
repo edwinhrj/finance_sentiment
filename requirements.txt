@@ -30,4 +30,11 @@ python-dotenv>=1.0.0
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
 
-
+# Source Reliability Analysis
+python-whois>=0.8.0
+validators>=0.22.0
+tldextract>=5.1.0
+newspaper3k>=0.2.8
+lxml-html-clean>=0.1.0
+textblob>=0.17.1
+requests>=2.31.0

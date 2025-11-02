@@ -20,11 +20,9 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, "/usr/local/airflow")
 
+# Lightweight imports - heavy transform modules imported lazily in task functions
 from extract import fetch_yf_data
 from extract import fetch_news_data
-from transform import transform_ticker_article as transform_ticker_article_module
-from transform import transform_sector_article as transform_sector_article_module
-
 from load.load_data import bulk_insert_dataframe, setup_database_schema, hardcode_tickers_and_sectors
 
 @dag(
@@ -116,6 +114,9 @@ def financial_data_pipeline():
         """
         Transform ticker news: compute sentiment and compare with price change.
         """
+        # Lazy import using importlib to avoid slow imports during DAG parsing
+        import importlib
+        transform_ticker_article_module = importlib.import_module('transform.transform_ticker_article')
         print("🔄 Starting sentiment transformation (sentiment + price correlation)...")
         final_df = transform_ticker_article_module.main(market_df, ticker_news_df)  # Correct order: market first, news second
         return final_df
@@ -125,6 +126,9 @@ def financial_data_pipeline():
         """
         Transform sector news articles: generate article_id, convert datetime to date.
         """
+        # Lazy import using importlib to avoid slow imports during DAG parsing
+        import importlib
+        transform_sector_article_module = importlib.import_module('transform.transform_sector_article')
         print("🔄 Starting article transformation...")
         transformed_articles = transform_sector_article_module.main(sector_news_df)
         return transformed_articles
@@ -148,6 +152,39 @@ def financial_data_pipeline():
         
         bulk_insert_dataframe(articles_df, table="finance.sector_article")
         print("✅ Articles load complete.")
+    
+    @task(task_id='transform_source_reliability')
+    def transform_source_reliability(sector_news_df):
+        """
+        Transform source URLs to base domains and compute reliability scores.
+        Uses sector_news_df which contains source_url and source_name from NewsAPI.
+        """
+        # Lazy import using importlib to avoid slow imports during DAG parsing
+        import importlib
+        transform_sources_reliability_module = importlib.import_module('transform.transform_sources_reliability')
+        print("🔄 Starting source reliability transformation...")
+        sources_df = transform_sources_reliability_module.main(sector_news_df)
+        return sources_df
+    
+    @task(task_id='load_sources_to_supabase')
+    def load_sources_data(sources_df):
+        """
+        Load source reliability data to finance.sources table.
+        Uses upsert on source_name to update existing sources.
+        """
+        print("🚀 Loading source reliability data to Supabase Postgres...")
+        
+        if sources_df is None or sources_df.empty:
+            print("⚠️ No source reliability data to load")
+            return
+        
+        # Use upsert on source_name (unique column) to update existing records
+        bulk_insert_dataframe(
+            sources_df, 
+            table="finance.sources",
+            unique_cols=["source_name"]  # Upsert on source_name
+        )
+        print("✅ Source reliability load complete.")
     # Define task execution order
     # 1. First, set up database schema
     schema_setup = setup_schema()
@@ -180,9 +217,13 @@ def financial_data_pipeline():
     # Path B: Sector news -> article transformation
     articles_df = transform_sector_article(sector_news_df)
     
+    # Path C: Sector news -> source reliability transformation
+    sources_df = transform_source_reliability(sector_news_df)
+    
     # 6. Load transformed data to database in parallel
     sentiment_load = load_sentiment_data(sentiment_df)
     articles_load = load_article_data(articles_df)
+    sources_load = load_sources_data(sources_df)
     
     # Set dependencies: schema setup -> populate reference data -> extraction -> unpack -> transform -> load
     schema_setup >> ref_data >> [market_df, news_data_tuple]
