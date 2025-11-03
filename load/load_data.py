@@ -97,10 +97,10 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
             )
         """))
         
-        # 6. old_sentiment (no dependencies) - preserved
+        # 5. ticker_article (aggregated ticker sentiment + wordcloud)
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS finance.old_sentiment (
-                id SERIAL PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS finance.ticker_article (
+                ticker_article_id SERIAL PRIMARY KEY,
                 stock_ticker TEXT,
                 sentiment_from_yesterday BOOLEAN,
                 price_change_in_percentage FLOAT,

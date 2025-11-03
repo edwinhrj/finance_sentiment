@@ -129,17 +129,17 @@ def financial_data_pipeline():
         transformed_articles = transform_sector_article_module.main(sector_news_df)
         return transformed_articles
     
-    @task(task_id='load_sentiment_to_supabase')
-    def load_sentiment_data(final_df):
-        print("🚀 Loading sentiment data to Supabase Postgres...")
+    @task(task_id='load_ticker_articles_to_supabase')
+    def load_ticker_articles(final_df):
+        print("🚀 Loading ticker article aggregates to Supabase Postgres...")
         
         # Drop 'id' column if it exists - let database auto-generate it
         if 'id' in final_df.columns:
             final_df = final_df.drop(columns=['id'])
             print("ℹ️  Dropped 'id' column - database will auto-generate it")
         
-        bulk_insert_dataframe(final_df, table="finance.old_sentiment")
-        print("✅ Sentiment load complete.")
+        bulk_insert_dataframe(final_df, table="finance.ticker_article")
+        print("✅ Ticker article load complete.")
     
     @task(task_id='load_articles_to_supabase')
     def load_article_data(articles_df):
@@ -175,13 +175,13 @@ def financial_data_pipeline():
     
     # 5. Transform data in parallel
     # Path A: Ticker news + market data -> sentiment analysis
-    sentiment_df = transform_ticker_article(ticker_news_df, market_df)
+    ticker_articles_df = transform_ticker_article(ticker_news_df, market_df)
     
     # Path B: Sector news -> article transformation
     articles_df = transform_sector_article(sector_news_df)
     
     # 6. Load transformed data to database in parallel
-    sentiment_load = load_sentiment_data(sentiment_df)
+    ticker_article_load = load_ticker_articles(ticker_articles_df)
     articles_load = load_article_data(articles_df)
     
     # Set dependencies: schema setup -> populate reference data -> extraction -> unpack -> transform -> load

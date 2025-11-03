@@ -16,6 +16,11 @@ from collections import Counter
 import re
 import json
 
+try:
+    from load.load_data import bulk_insert_dataframe  # Airflow-safe import path
+except Exception:  # pragma: no cover - keeps local CSV usage working when load module unavailable
+    bulk_insert_dataframe = None
+
 # ---------------------------------------------------------------------
 # File paths (local testing)
 # ---------------------------------------------------------------------
@@ -130,7 +135,7 @@ def compute_price_change(market_df: pd.DataFrame):
     return market_df[["symbol", "price_change_in_percentage", "price_trend"]]
 
 # -----------------------------
-# Merge for finance.old_sentiment
+# Merge for finance.ticker_article
 # -----------------------------
 def merge_sentiment_and_prices(sentiment_df, price_df):
     merged = pd.merge(sentiment_df, price_df, on="symbol", how="left")
@@ -149,9 +154,33 @@ def merge_sentiment_and_prices(sentiment_df, price_df):
     merged["created_at"] = datetime.now(pytz.timezone("Asia/Singapore"))
     merged["stock_ticker"] = merged["symbol"]
 
-    return merged[
-        ["stock_ticker", "sentiment_from_yesterday", "price_change_in_percentage", "match", "created_at", "wordcloud_json"]
+    final_columns = [
+        "stock_ticker",
+        "sentiment_from_yesterday",
+        "price_change_in_percentage",
+        "match",
+        "created_at",
+        "wordcloud_json",
     ]
+
+    return merged[final_columns]
+
+
+def load_ticker_articles_to_db(df: pd.DataFrame, table: str = "finance.ticker_article") -> int:
+    """Persist the ticker article aggregation into Postgres if loaders are available."""
+
+    if df is None or df.empty:
+        print("ℹ️ No ticker article records to load.")
+        return 0
+
+    if bulk_insert_dataframe is None:
+        print("⚠️ bulk_insert_dataframe unavailable. Skipping database load.")
+        return 0
+
+    print(f"🚀 Loading {len(df)} ticker article rows into {table} ...")
+    rows = bulk_insert_dataframe(df, table=table)
+    print(f"✅ Loaded {rows} rows into {table}.")
+    return rows
 
 # -----------------------------
 # Main
@@ -171,3 +200,6 @@ if __name__ == "__main__":
     final_df.to_csv(out_path, index=False)
 
     print("✅ Saved:", os.path.abspath(out_path))
+
+    # Attempt to load into the ticker_article table when possible
+    load_ticker_articles_to_db(final_df)
