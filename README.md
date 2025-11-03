@@ -1,5 +1,22 @@
 # Overview
 
+Financial Data Sentiment Pipeline
+
+A fully automated data engineering pipeline that quantifies how financial news sentiment affects market movements.
+Built with Apache Airflow, yFinance, NewsAPI, and FinBERT/DistilBERT, it extracts daily market and news data, performs sentiment analysis, and stores the results in a Supabase PostgreSQL database for analysis and dashboards.
+
+Key Features
+
+Automated daily ETL with Airflow
+
+FinBERT (sector-level) and DistilBERT (ticker-level) sentiment scoring
+
+Wordcloud generation for top-mentioned keywords
+
+Integration of news sentiment with market price changes
+
+Tech Stack: Airflow · Python · Hugging Face Transformers · Pandas · Supabase · NewsAPI · yFinance
+
 Welcome to Astronomer! This project was generated after you ran 'astro dev init' using the Astronomer CLI. This readme describes the contents of the project, as well as how to run Apache Airflow on your local machine.
 
 # Project Contents
