@@ -103,8 +103,10 @@ def compute_reliability(url):
         url = "https://" + url
 
     score_components = {}
-    domain = tldextract.extract(url).top_domain_under_public_suffix
-    score_components["domain_valid"] = 1.0 if validators.domain(domain) else 0.0
+    extracted = tldextract.extract(url)
+    # Use registered domain (e.g., "reddit.com") for validation and whois
+    domain_registered = ".".join([p for p in [extracted.domain, extracted.suffix] if p])
+    score_components["domain_valid"] = 1.0 if validators.domain(domain_registered) else 0.0
 
     # --- HTTPS / STATUS ---
     try:
@@ -127,7 +129,7 @@ def compute_reliability(url):
 
     # --- DOMAIN AGE ---
     try:
-        w = whois.whois(domain)
+        w = whois.whois(domain_registered)
         creation = w.creation_date
         if isinstance(creation, list):
             creation = creation[0]
@@ -136,9 +138,9 @@ def compute_reliability(url):
     except Exception:
         domain_age_norm = 0.0
 
-    if domain.endswith((".gov", ".edu", ".mil", ".org", ".gov.sg")):
+    if domain_registered.endswith((".gov", ".edu", ".mil", ".org", ".gov.sg")):
         domain_age_norm = 1.0
-    elif domain.endswith((".com", ".co", ".net")):
+    elif domain_registered.endswith((".com", ".co", ".net")):
         domain_age_norm = max(domain_age_norm, 0.9)
 
     score_components["domain_age"] = domain_age_norm
@@ -186,7 +188,7 @@ def compute_reliability(url):
     if any(src in url for src in trusted_sources):
         total_score += 15
 
-    if domain.endswith((".gov", ".edu", ".mil", ".org", ".gov.sg")):
+    if domain_registered.endswith((".gov", ".edu", ".mil", ".org", ".gov.sg")):
         total_score += 10
 
 # Floor for reliable .com domains
@@ -222,8 +224,8 @@ def main(articles_df: pd.DataFrame) -> pd.DataFrame:
         print("No articles data to process")
         return pd.DataFrame(columns=["source_name", "credibility_score", "rating", "last_verified"])
     
-    if "source_url" not in articles_df.columns or "source_name" not in articles_df.columns:
-        raise ValueError("Missing required columns 'source_url' or 'source_name' in articles_df")
+    if "source_url" not in articles_df.columns:
+        raise ValueError("Missing required column 'source_url' in articles_df")
     
     # Normalize URLs to base domains
     print("Normalizing URLs to base domains...")
