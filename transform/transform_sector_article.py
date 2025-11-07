@@ -77,6 +77,51 @@ def calculate_impact_score(text: str) -> float:
         return 0.0
 
 
+# --- Helper: Apply FinBERT to Spark-produced Parquet and write final Parquet
+def apply_finbert_to_parquet(curated_clean_path: str, curated_final_path: str) -> str:
+    """
+    Read Spark-curated parquet (tabular cleanup already done),
+    compute FinBERT impact_score, and write final parquet for loading.
+
+    Returns the output path for convenience.
+    """
+    import pandas as pd
+
+    print(f"📥 Reading curated parquet from: {curated_clean_path}")
+    df = pd.read_parquet(curated_clean_path)
+
+    if df.empty:
+        print("ℹ️ No rows to score; writing empty final parquet.")
+        final_columns = [
+            'sector_id','title','content','date_published','source_url','author','source_name','impact_score'
+        ]
+        pd.DataFrame(columns=final_columns).to_parquet(curated_final_path, index=False)
+        return curated_final_path
+
+    # Combine title and content for context
+    df['combined_text'] = df['title'].fillna('') + ' ' + df['content'].fillna('')
+    print(f"🤖 Scoring {len(df)} articles with FinBERT…")
+    df['impact_score'] = df['combined_text'].apply(calculate_impact_score)
+    df = df.drop(columns=['combined_text'])
+
+    # Ensure final schema & order
+    final_columns = [
+        'sector_id', 'title', 'content', 'date_published',
+        'source_url', 'author', 'source_name', 'impact_score'
+    ]
+    for col in final_columns:
+        if col not in df.columns:
+            # backfill missing cols (Spark step should have created all except impact_score)
+            df[col] = None
+
+    df = df[final_columns]
+
+    print(f"📤 Writing final parquet to: {curated_final_path}")
+    df.to_parquet(curated_final_path, index=False)
+    print("✅ FinBERT scoring complete.")
+    return curated_final_path
+
+
 def main(sector_news_df: pd.DataFrame) -> pd.DataFrame:
     """
     Transform sector news dataframe for database insertion.
@@ -170,21 +215,27 @@ def main(sector_news_df: pd.DataFrame) -> pd.DataFrame:
     
     
 if __name__ == "__main__":
-    # For testing - load the sector news CSV if it exists
     import os
-    
-    if os.path.exists("sector_news_data.csv"):
-        print("📂 Loading sector_news_data.csv for testing...")
-        sector_news_df = pd.read_csv("sector_news_data.csv")
-        
-        # Transform the data
-        transformed_df = main(sector_news_df)
-        
-        # Save to output CSV for inspection
-        output_path = "transformed_articles.csv"
-        transformed_df.to_csv(output_path, index=False)
-        print(f"\n✅ Saved transformed data to {output_path}")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Sector transform utilities")
+    parser.add_argument("--in", dest="in_path", help="Path to curated parquet from Spark")
+    parser.add_argument("--out", dest="out_path", help="Path to write final parquet with impact_score")
+    args, unknown = parser.parse_known_args()
+
+    # Mode 1: CLI apply_finbert_to_parquet
+    if args.in_path and args.out_path:
+        apply_finbert_to_parquet(args.in_path, args.out_path)
     else:
-        print("❌ sector_news_data.csv not found. Run fetch_news_data.py first.")
+        # Mode 2: Local CSV testing of original DataFrame pipeline
+        if os.path.exists("sector_news_data.csv"):
+            print("📂 Loading sector_news_data.csv for testing…")
+            sector_news_df = pd.read_csv("sector_news_data.csv")
+            transformed_df = main(sector_news_df)
+            output_path = "transformed_articles.csv"
+            transformed_df.to_csv(output_path, index=False)
+            print(f"\n✅ Saved transformed data to {output_path}")
+        else:
+            print("❌ sector_news_data.csv not found. Run fetch_news_data.py first or pass --in/--out paths.")
 
 

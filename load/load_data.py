@@ -1,10 +1,11 @@
 # load/load_data.py
 import os
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Literal
 
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+import uuid
 
 def _make_engine_from_env() -> Engine:
     def first(*keys, default=None):
@@ -131,13 +132,15 @@ def bulk_insert_dataframe(
     index: bool = False,
     chunksize: int = 1000,
     unique_cols: Optional[Sequence[str]] = None,
+    on_conflict: Literal["nothing", "update"] = "nothing",
 ) -> int:
     """
     Load a DataFrame into Postgres.
     - table: "schema.table" or "table"
     - if_exists: 'append' | 'replace' (be careful with replace!)
-    - unique_cols: if provided, do an upsert on those columns.
-    Returns number of rows written.
+    - unique_cols: if provided, perform an UPSERT on those columns
+    - on_conflict: "nothing" (DO NOTHING) or "update" (DO UPDATE non-unique cols)
+    Returns number of rows attempted to write.
     """
     if df is None or df.empty:
         return 0
@@ -146,33 +149,70 @@ def bulk_insert_dataframe(
     engine = _make_engine_from_env()
     _ensure_schema(engine, schema)
 
+    # No upsert requested -> plain append via pandas
     if not unique_cols:
-        # Simple append
-        df.to_sql(name=name, con=engine, schema=schema,
-                  if_exists=if_exists, index=index, chunksize=chunksize, method="multi")
+        df.to_sql(
+            name=name,
+            con=engine,
+            schema=schema,
+            if_exists=if_exists,
+            index=index,
+            chunksize=chunksize,
+            method="multi",
+        )
         return len(df)
 
-    # Upsert path using a temp table + MERGE/ON CONFLICT
-    tmp_table = f"_{name}_tmp_load"
+    # --- Upsert path ---
+    # Clean & dedupe incoming batch first on the unique key(s)
+    df = df.copy()
+    for c in unique_cols:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
+    df = df.drop_duplicates(subset=list(unique_cols))
+    if df.empty:
+        return 0
+
+    cols = list(df.columns)
+    conflict_cols = ", ".join([f'"{c}"' for c in unique_cols])
+    cols_ident = ", ".join([f'"{c}"' for c in cols])
+
+    # Build SET clause for DO UPDATE (skip unique cols)
+    non_unique_cols = [c for c in cols if c not in unique_cols]
+    excluded_updates = ", ".join([f'"{c}" = EXCLUDED."{c}"' for c in non_unique_cols])
+
+    tmp_table = f"_{name}_tmp_{uuid.uuid4().hex[:8]}"
+
     with engine.begin() as conn:
-        # 1) create temp table with same columns via pandas
-        df.to_sql(name=tmp_table, con=conn, schema=schema,
-                  if_exists="replace", index=index, chunksize=chunksize, method="multi")
+        # 1) Stage into a uniquely-named temp table in the same schema
+        df.to_sql(
+            name=tmp_table,
+            con=conn,
+            schema=schema,
+            if_exists="replace",
+            index=index,
+            chunksize=chunksize,
+            method="multi",
+        )
 
-        # 2) Build upsert SQL
-        cols = list(df.columns)
-        cols_ident = ", ".join([f'"{c}"' for c in cols])
-        excluded_updates = ", ".join([f'"{c}" = EXCLUDED."{c}"' for c in cols if c not in unique_cols])
-        conflict_cols = ", ".join([f'"{c}"' for c in unique_cols])
+        # 2) Upsert from the staged table
+        if on_conflict == "update" and excluded_updates:
+            upsert_sql = f'''
+                INSERT INTO "{schema}"."{name}" ({cols_ident})
+                SELECT {cols_ident} FROM "{schema}"."{tmp_table}"
+                ON CONFLICT ({conflict_cols})
+                DO UPDATE SET {excluded_updates};
+            '''
+        else:
+            # Default: skip duplicates safely (idempotent loads)
+            upsert_sql = f'''
+                INSERT INTO "{schema}"."{name}" ({cols_ident})
+                SELECT {cols_ident} FROM "{schema}"."{tmp_table}"
+                ON CONFLICT ({conflict_cols}) DO NOTHING;
+            '''
 
-        upsert_sql = f'''
-        INSERT INTO "{schema}"."{name}" ({cols_ident})
-        SELECT {cols_ident} FROM "{schema}"."{tmp_table}"
-        ON CONFLICT ({conflict_cols})
-        DO UPDATE SET {excluded_updates};
-        DROP TABLE "{schema}"."{tmp_table}";
-        '''
         conn.execute(text(upsert_sql))
+        # 3) Clean up the staging table
+        conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{tmp_table}"'))
 
     return len(df)
 

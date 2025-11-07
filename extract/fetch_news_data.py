@@ -1,33 +1,45 @@
 """
-Script to fetch news data for multiple tickers from NewsAPI
-and store them in one DataFrame with a 'ticker' column.
+Script to fetch news data for multiple tickers/sectors from NewsAPI.
+Now writes JSONL files to a path structure suitable for Spark and returns paths instead of DataFrames.
+
+Paths (override RAW_BASE_DIR via env if needed):
+  /usr/local/airflow/data/raw/news/sector/date=YYYY-MM-DD/part.jsonl
+  /usr/local/airflow/data/raw/news/ticker/date=YYYY-MM-DD/part.jsonl
+
+Note: Ticker rows now include `date_published` and `source_url` to match Spark schema.
 """
 
+import os
+import pathlib
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 # ------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------
-API_KEY = "bdd295d9894c4f078a2973fd7cd15b97"
+API_KEY = os.getenv("NEWS_API_KEY", "bdd295d9894c4f078a2973fd7cd15b97")
 TICKERS = ["AAPL", "MSFT", "AMZN", "GOOGL", "META"]
 SECTORS = ["technology"]
+RAW_BASE_DIR = os.getenv("RAW_BASE_DIR", "/usr/local/airflow/data/raw/news")
 
 # Automatically get the date (2 days ago)
-today = datetime.now()
-two_days_ago = today - timedelta(days=2)
-DATE_STR = two_days_ago.strftime("%Y-%m-%d")
+_today = datetime.now()
+_two_days_ago = _today - timedelta(days=2)
+DATE_STR = _two_days_ago.strftime("%Y-%m-%d")
 
+# ------------------------------------------------------------
+# HELPERS
+# ------------------------------------------------------------
+def _ensure_dir(p: str) -> None:
+    pathlib.Path(p).mkdir(parents=True, exist_ok=True)
 
 # ------------------------------------------------------------
 # FUNCTION: Fetch News for One Ticker
 # ------------------------------------------------------------
 def fetch_news_data_for_ticker(ticker: str) -> Optional[pd.DataFrame]:
-    """
-    Fetch news data for one ticker and return a DataFrame with a 'ticker' column.
-    """
+    """Fetch news data for one ticker and return a DataFrame with a 'ticker' column."""
     api_url = (
         f"https://newsapi.org/v2/everything?"
         f"q={ticker}&from={DATE_STR}&to={DATE_STR}&sortBy=popularity&apiKey={API_KEY}"
@@ -47,14 +59,15 @@ def fetch_news_data_for_ticker(ticker: str) -> Optional[pd.DataFrame]:
             print(f"ℹ️ No articles found for {ticker}")
             return None
 
-        # Extract relevant fields + add ticker column
         processed = [
             {
                 "source_id": art.get("source", {}).get("id"),
                 "source_name": art.get("source", {}).get("name"),
                 "title": art.get("title"),
                 "content": art.get("content"),
-                "publishedAt": art.get("publishedAt"),
+                # Align with Spark job expectations
+                "date_published": art.get("publishedAt"),  # string; cast in Spark
+                "source_url": art.get("url"),
                 "ticker": ticker,
             }
             for art in articles
@@ -68,109 +81,118 @@ def fetch_news_data_for_ticker(ticker: str) -> Optional[pd.DataFrame]:
         print(f"❌ Error fetching {ticker}: {e}")
         return None
 
-
 # ------------------------------------------------------------
 # FUNCTION: Fetch News for One Sector
 # ------------------------------------------------------------
 def fetch_news_data_for_sector(sector: str, sector_id: int, num_articles: int) -> Optional[pd.DataFrame]:
     """
     Fetch news data for one sector using NewsAPI's top-headlines endpoint.
-    Returns a DataFrame with a 'sector' column containing the last 20 articles.
-    
+    Returns a DataFrame with DB-aligned columns for downstream processing.
+
     Valid sectors: business, entertainment, general, health, science, sports, technology
     """
     api_url = (
         f"https://newsapi.org/v2/top-headlines?"
         f"country=us&category={sector}&apiKey={API_KEY}"
     )
-    
+
     try:
         response = requests.get(api_url)
         response.raise_for_status()
         data = response.json()
-        
+
         if data.get("status") != "ok":
             print(f"⚠️ API error for sector {sector}: {data.get('status')}")
             return None
-        
+
         articles = data.get("articles", [])
         if not articles:
             print(f"ℹ️ No articles found for sector {sector}")
             return None
-        
-        # Get only the newest x articles for this particular sector
+
+        # Newest x articles
         articles = articles[:num_articles]
-        
-        # Extract relevant fields and map to database schema
+
         processed = [
             {
-                "sector_id": sector_id, 
+                "sector_id": sector_id,
                 "title": art.get("title"),
                 "content": art.get("content"),
-                "date_published": art.get("publishedAt"), # still datetime -> need convert to date in transform
+                "date_published": art.get("publishedAt"),  # string; cast in transform
                 "source_url": art.get("url"),
                 "author": art.get("author"),
-                "source_name": art.get("source", {}).get("name")
+                "source_name": art.get("source", {}).get("name"),
             }
             for art in articles
         ]
-        
+
         df = pd.DataFrame(processed)
         print(f"✅ {sector}: fetched {len(df)} articles")
         return df
-    
+
     except Exception as e:
         print(f"❌ Error fetching sector {sector}: {e}")
         return None
 
-
 # ------------------------------------------------------------
-# MAIN
+# MAIN (writes JSONL + returns paths for Spark)
 # ------------------------------------------------------------
-def main():
-    ticker_dfs = []
-    sector_dfs = []
+def main(out_base_dir: Optional[str] = None, exec_date: Optional[str] = None) -> Dict[str, str]:
+    """
+    Fetch ticker + sector news, write JSONL to `out_base_dir` using a date partition,
+    and return the folder paths for downstream Spark jobs.
 
-    # Fetch ticker news
+    Returns dict with keys: {"ticker_path": <dir>, "sector_path": <dir>}
+    """
+    base = out_base_dir or RAW_BASE_DIR
+
+    # Allow Airflow to pass in {{ ds }}; otherwise default to DATE_STR
+    date_str = exec_date or DATE_STR
+
+    ticker_dir = os.path.join(base, "ticker", f"date={date_str}")
+    sector_dir = os.path.join(base, "sector", f"date={date_str}")
+
+    _ensure_dir(ticker_dir)
+    _ensure_dir(sector_dir)
+
+    ticker_dfs: List[pd.DataFrame] = []
+    sector_dfs: List[pd.DataFrame] = []
+
+    # Ticker fetches
     for ticker in TICKERS:
         df = fetch_news_data_for_ticker(ticker)
-        if df is not None:
+        if df is not None and not df.empty:
             ticker_dfs.append(df)
 
-    # Fetch sector news 
+    # Sector fetches (IDs start at 1 to match your DB seed if needed)
     for i, sector in enumerate(SECTORS, start=1):
         df = fetch_news_data_for_sector(sector, i, num_articles=20)
-        if df is not None:
+        if df is not None and not df.empty:
             sector_dfs.append(df)
 
-    # Combine all the dataframes
-    ticker_news_df = pd.concat(ticker_dfs, ignore_index=True) if ticker_dfs else pd.DataFrame()
-    sector_news_df = pd.concat(sector_dfs, ignore_index=True) if sector_dfs else pd.DataFrame()
-    
-    return ticker_news_df, sector_news_df  # Return tuple of 2 dataframes
+    # Combine and write JSONL for Spark
+    if ticker_dfs:
+        ticker_df = pd.concat(ticker_dfs, ignore_index=True)
+        ticker_path = os.path.join(ticker_dir, "part.jsonl")
+        ticker_df.to_json(ticker_path, orient="records", lines=True)
+        print(f"📄 wrote ticker JSONL → {ticker_path} ({len(ticker_df)} rows)")
+    else:
+        print("🚫 No ticker news data fetched.")
+
+    if sector_dfs:
+        sector_df = pd.concat(sector_dfs, ignore_index=True)
+        sector_path = os.path.join(sector_dir, "part.jsonl")
+        sector_df.to_json(sector_path, orient="records", lines=True)
+        print(f"📄 wrote sector JSONL → {sector_path} ({len(sector_df)} rows)")
+    else:
+        print("🚫 No sector news data fetched.")
+
+    return {"ticker_path": ticker_dir, "sector_path": sector_dir}
 
 
 if __name__ == "__main__":
-    ticker_news_df, sector_news_df = main()
-    
-    # Save ticker news to CSV
-    if not ticker_news_df.empty:
-        ticker_news_df.to_csv("news_data.csv", index=False)
-        print(f"\n✅ Saved {len(ticker_news_df)} ticker news rows to news_data.csv")
-        print("\n📊 Ticker News Preview:")
-        print(ticker_news_df.head())
-    else:
-        print("🚫 No ticker news data fetched.")
-    
-    # Save sector news to CSV
-    if not sector_news_df.empty:
-        sector_news_df.to_csv("sector_news_data.csv", index=False)
-        print(f"\n✅ Saved {len(sector_news_df)} sector news rows to sector_news_data.csv")
-        print("\n📊 Sector News Preview:")
-        print(sector_news_df.head())
-        print("\n📋 Sector News Columns:")
-        print(sector_news_df.columns.tolist())
-        print("\n📊 Sector News Info:")
-        print(sector_news_df.info())
-    else:
-        print("🚫 No sector news data fetched.")
+    # CLI use: write JSONL under RAW_BASE_DIR and print the paths
+    paths = main()
+    print("\n✅ Ready for Spark:")
+    for k, v in paths.items():
+        print(f"  {k}: {v}")
