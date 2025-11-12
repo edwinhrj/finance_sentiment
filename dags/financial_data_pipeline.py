@@ -164,6 +164,66 @@ def financial_data_pipeline():
             on_conflict="nothing",  # or "update" to refresh fields
         )
         print("✅ Articles load complete.")
+
+    @task(task_id='load_ticker_articles_to_supabase')
+    def load_ticker_article_data(df):
+        """
+        Load ticker-level sentiment rows into finance.ticker_article.
+
+        Target columns in table:
+          - stock_ticker (text)
+          - sentiment_from_yesterday (boolean)
+          - price_change_in_percentage (double precision)
+          - match (boolean)
+          - created_at (timestamp without time zone)
+          - wordcloud_json (jsonb)
+        """
+        print("🚀 Loading ticker articles (sentiment rows) to Supabase Postgres...")
+
+        if df is None or df.empty:
+            print("⚠️ No ticker sentiment rows to load")
+            return
+
+        # Normalize column names from transform output
+        rename_map = {}
+        if "ticker" in df.columns and "stock_ticker" not in df.columns:
+            rename_map["ticker"] = "stock_ticker"
+        if "wordcloud" in df.columns and "wordcloud_json" not in df.columns:
+            rename_map["wordcloud"] = "wordcloud_json"
+        if rename_map:
+            df = df.rename(columns=rename_map)
+
+        # Keep only columns that exist in finance.ticker_article
+        wanted_cols = [
+            "stock_ticker",
+            "sentiment_from_yesterday",
+            "price_change_in_percentage",
+            "match",
+            "created_at",
+            "wordcloud_json",
+        ]
+        present_cols = [c for c in wanted_cols if c in df.columns]
+        missing = [c for c in wanted_cols if c not in df.columns]
+        if missing:
+            print(f"ℹ️  Missing columns not loaded (ok if not produced by transform): {missing}")
+
+        df = df[present_cols].copy()
+
+        # Ensure created_at is a proper timestamp if present
+        if "created_at" in df.columns:
+            try:
+                import pandas as pd
+                df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+            except Exception as e:
+                print(f"⚠️ Could not coerce created_at to datetime: {e}")
+
+        # Insert (no unique key defined on table schema shown)
+        bulk_insert_dataframe(
+            df,
+            table="finance.ticker_article",
+        )
+
+        print("✅ Ticker sentiment rows load complete.")
     
     @task(task_id='transform_source_reliability')
     def transform_source_reliability(sector_news_df):
@@ -280,6 +340,7 @@ def financial_data_pipeline():
     
     ticker_curated_df = read_ticker_curated()
     sentiment_df = transform_ticker_article(ticker_curated_df, market_df)
+    ticker_articles_load = load_ticker_article_data(sentiment_df)
     
     sector_curated_df = read_sector_curated()
     articles_df = transform_sector_article(sector_curated_df)
@@ -290,6 +351,7 @@ def financial_data_pipeline():
     sentiment_load = load_sentiment_data(sentiment_df)
     articles_load = load_article_data(articles_df)
     sources_load = load_sources_data(sources_df)
+    # ticker_articles_load already defined above
     
     # Set dependencies: schema setup -> populate reference data -> extraction -> unpack -> transform -> load
     schema_setup >> ref_data >> [market_df, news_data_tuple]
@@ -298,6 +360,7 @@ def financial_data_pipeline():
     transform_sector_articles_spark.set_upstream(sector_news_df)
 
     transform_ticker_news_spark >> ticker_curated_df >> sentiment_df
+    sentiment_df >> ticker_articles_load
     transform_sector_articles_spark >> sector_curated_df >> [articles_df, sources_df]
 
 
