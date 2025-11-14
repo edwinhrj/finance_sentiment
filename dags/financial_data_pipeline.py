@@ -169,6 +169,8 @@ def financial_data_pipeline():
     def load_ticker_article_data(df):
         """
         Load ticker-level sentiment rows into finance.ticker_article.
+        Business rule:
+        - For each (stock_ticker, created_at DATE), keep only the latest row.
 
         Target columns in table:
           - stock_ticker (text)
@@ -217,6 +219,17 @@ def financial_data_pipeline():
             except Exception as e:
                 print(f"⚠️ Could not coerce created_at to datetime: {e}")
 
+        # Dedupe: latest row per (stock_ticker, created_at DATE)
+        if "created_at" in df.columns and "stock_ticker" in df.columns:
+            df["created_date"] = df["created_at"].dt.date
+            # sort so the newest created_at is kept
+            df = (
+                df.sort_values("created_at")
+                .drop_duplicates(subset=["stock_ticker", "created_date"], keep="last")
+                .drop(columns=["created_date"])
+            )
+            print(f"✅ After dedupe, {len(df)} rows to insert into ticker_article")
+              
         # Insert (no unique key defined on table schema shown)
         bulk_insert_dataframe(
             df,

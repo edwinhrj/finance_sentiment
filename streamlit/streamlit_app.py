@@ -20,15 +20,11 @@ CONN_STR = (
 )
 engine = create_engine(CONN_STR)
 
-
 # --------------------------------------------------
 # Cached loaders
 # --------------------------------------------------
 @st.cache_data(ttl=300)
 def load_ticker_articles():
-    """
-    Load raw ticker_article rows.
-    """
     sql = """
         SELECT
             ticker_article_id,
@@ -43,7 +39,6 @@ def load_ticker_articles():
     """
     df = pd.read_sql(sql, engine)
 
-    # Map bool/0/1 to Positive/Negative
     mapping = {True: "Positive", False: "Negative", 1: "Positive", 0: "Negative"}
     if "sentiment_from_yesterday" in df.columns:
         df["sentiment_from_yesterday"] = (
@@ -60,10 +55,6 @@ def load_ticker_articles():
 
 @st.cache_data(ttl=300)
 def load_sector_articles():
-    """
-    Load sector_article rows with impact scores.
-    Only fields needed for the right-hand table.
-    """
     sql = """
         SELECT
             title,
@@ -91,6 +82,31 @@ def sentiment_to_score(label):
             return -1
     return 0
 
+
+def color_number(val):
+    if pd.isna(val):
+        return "color: #aaaaaa;"
+    if val > 0:
+        return "color: #2ecc71; font-weight:600;"   # green
+    if val < 0:
+        return "color: #e74c3c; font-weight:600;"   # red
+    return "color: #aaaaaa;"                        # zero
+
+
+def filter_by_single_date(df, col_name, date_value):
+    if df.empty or date_value is None:
+        return df
+    return df[df[col_name].dt.date == date_value].copy()
+
+
+def dedupe_latest_per_ticker(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only the latest row per stock_ticker for this date."""
+    if df.empty or "stock_ticker" not in df.columns or "created_at" not in df.columns:
+        return df
+    return (
+        df.sort_values("created_at")          # oldest → newest
+          .drop_duplicates(subset=["stock_ticker"], keep="last")
+    )
 
 # --------------------------------------------------
 # Load data
@@ -141,39 +157,48 @@ with st.sidebar:
     top_n = st.slider("Top N Articles (Impact)", min_value=3, max_value=20, value=5, step=1)
 
 # --------------------------------------------------
-# Helpers
-# --------------------------------------------------
-def filter_by_single_date(df, col_name, date_value):
-    if df.empty or date_value is None:
-        return df
-    return df[df[col_name].dt.date == date_value].copy()
-
-# --------------------------------------------------
 # Daily slices
 # --------------------------------------------------
-# left (same day as report date)
 ticker_day = filter_by_single_date(ticker_df, "created_at", report_date) if not ticker_df.empty else ticker_df
+# deduped view = latest row per ticker for this date
+ticker_view = dedupe_latest_per_ticker(ticker_day)
 
-# right (previous day regardless of global filter)
 prev_date = (pd.to_datetime(report_date) - pd.Timedelta(days=1)).date() if report_date else None
 sector_prev_day = filter_by_single_date(sector_df, "date_published", prev_date) if not sector_df.empty else sector_df
 
 # --------------------------------------------------
-# KPI cards – based on ticker_day (report date)
+# KPI cards – use ticker_view (deduped)
 # --------------------------------------------------
-if not ticker_day.empty:
-    tmp = ticker_day.copy()
+if not ticker_view.empty:
+    tmp = ticker_view.copy()
     tmp["sentiment_score"] = tmp["sentiment_from_yesterday"].apply(sentiment_to_score)
     avg_sentiment = tmp["sentiment_score"].mean()
     avg_price_change = tmp["price_change_in_percentage"].mean() if "price_change_in_percentage" in tmp else 0.0
-    num_articles = len(tmp)
+
+    # Now these are counts of UNIQUE tickers for the day
+    num_tickers = len(tmp)
     num_negative = (tmp["sentiment_from_yesterday"] == "Negative").sum()
 
     label_date = report_date.strftime("%Y-%m-%d") if report_date else "N/A"
+
+    sent_color = "#2ecc71" if avg_sentiment > 0 else "#e74c3c" if avg_sentiment < 0 else "#aaaaaa"
+    price_color = "#2ecc71" if avg_price_change > 0 else "#e74c3c" if avg_price_change < 0 else "#aaaaaa"
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric(f"📈 Avg Sentiment (Score) – {label_date}", f"{avg_sentiment:.3f}")
-    c2.metric(f"💹 Avg Price Change (%) – {label_date}", f"{avg_price_change:.3f}")
-    c3.metric(f"📰 Articles on {label_date}", num_articles)
+
+    c1.markdown(f"**📈 Avg Sentiment (Score) – {label_date}**")
+    c1.markdown(
+        f"<span style='font-size:2.3rem; font-weight:700; color:{sent_color};'>{avg_sentiment:.3f}</span>",
+        unsafe_allow_html=True,
+    )
+
+    c2.markdown(f"**💹 Avg Price Change (%) – {label_date}**")
+    c2.markdown(
+        f"<span style='font-size:2.3rem; font-weight:700; color:{price_color};'>{avg_price_change:.3f}</span>",
+        unsafe_allow_html=True,
+    )
+
+    c3.metric(f"📰 Tickers on {label_date}", num_tickers)
     c4.metric(f"⚠️ Negative Alerts on {label_date}", int(num_negative))
 else:
     st.info("No ticker data for the selected report date.")
@@ -186,17 +211,18 @@ st.markdown("---")
 left_col, right_col = st.columns([1.4, 1])
 
 # =======================
-# LEFT – Daily Summary
+# LEFT – Daily Summary (using ticker_view)
 # =======================
 with left_col:
     label_date = report_date.strftime("%Y-%m-%d") if report_date else "N/A"
     st.subheader(f"📊 Ticker Daily Summary – {label_date}")
-    st.caption("Summary per ticker for the selected report date.")
+    st.caption("Summary per ticker for the selected report date (latest run per ticker).")
 
-    if ticker_day.empty:
+    if ticker_view.empty:
         st.info("No ticker article data for this date.")
     else:
-        df_left = ticker_day.copy()
+        df_left = ticker_view.copy()
+
         if selected_tickers:
             df_left = df_left[df_left["stock_ticker"].isin(selected_tickers)]
         if selected_sentiments:
@@ -209,22 +235,31 @@ with left_col:
             summary_df = (
                 df_left.groupby("stock_ticker")
                 .agg(
-                    article_count=("ticker_article_id", "count"),
+                    article_count=("ticker_article_id", "count"),  # will be 1 per ticker now
                     avg_sentiment=("sentiment_score", "mean"),
                     avg_price_change=("price_change_in_percentage", "mean"),
                 )
                 .reset_index()
                 .sort_values("stock_ticker")
             )
+
+            summary_display = summary_df.rename(
+                columns={
+                    "stock_ticker": "Ticker",
+                    "article_count": "# Articles",
+                    "avg_sentiment": "Avg Sentiment Score",
+                    "avg_price_change": "Avg Price Change (%)",
+                }
+            )
+
+            styled_summary = (
+                summary_display.style
+                .applymap(color_number, subset=["Avg Sentiment Score"])
+                .applymap(color_number, subset=["Avg Price Change (%)"])
+            )
+
             st.dataframe(
-                summary_df.rename(
-                    columns={
-                        "stock_ticker": "Ticker",
-                        "article_count": "# Articles",
-                        "avg_sentiment": "Avg Sentiment Score",
-                        "avg_price_change": "Avg Price Change (%)",
-                    }
-                ),
+                styled_summary,
                 use_container_width=True,
                 hide_index=True,
             )
@@ -234,7 +269,9 @@ with left_col:
                 "Select a ticker to view article-level details",
                 options=summary_df["stock_ticker"].tolist(),
             )
-            detail_df = df_left[df_left["stock_ticker"] == selected_ticker_for_details].copy()
+
+            # For drilldown: show only the *latest* row for that ticker (same as summary)
+            detail_df = ticker_view[ticker_view["stock_ticker"] == selected_ticker_for_details].copy()
             if "created_at" in detail_df.columns:
                 detail_df["created_at"] = detail_df["created_at"].dt.strftime("%Y-%m-%d %H:%M")
 
