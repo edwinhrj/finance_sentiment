@@ -141,10 +141,13 @@ def financial_data_pipeline():
         return transformed_articles
     
     @task(task_id='load_articles_to_supabase')
-    def load_article_data(articles_df):
+    def load_article_data(articles_df, ds=None):
         print("🚀 Loading article data to Supabase Postgres...")
 
-        
+        import pandas as pd
+        articles_df = articles_df. copy ()
+        articles_df ["created_at"] = pd. to_datetime(ds)
+
         bulk_insert_dataframe(
             articles_df,
             table="finance.sector_article",
@@ -161,12 +164,12 @@ def financial_data_pipeline():
         - For each (ticker_id, created_at DATE), keep only the latest row.
 
         Target columns in table:
-          - ticker_id (text)
-          - sentiment_from_yesterday (boolean)
-          - price_change_in_percentage (double precision)
-          - match (boolean)
-          - created_at (timestamp without time zone)
-          - wordcloud_json (jsonb)
+        - ticker_id (text)
+        - sentiment_from_yesterday (boolean)
+        - price_change_in_percentage (double precision)
+        - match (boolean)
+        - created_at (timestamp without time zone)
+        - wordcloud_json (jsonb)
         """
         print("🚀 Loading ticker articles (sentiment rows) to Supabase Postgres...")
 
@@ -174,16 +177,25 @@ def financial_data_pipeline():
             print("⚠️ No ticker sentiment rows to load")
             return
 
+        import pandas as pd
+        # get Airflow logical date (ds) for this run
+        from airflow.operators.python import get_current_context
+        ctx = get_current_context()
+        ds = ctx["ds"]            # 'YYYY-MM-DD'
+        # optional: set a "market close" time (e.g. 21:00 UTC) or just midnight
+        created_ts = pd.to_datetime(ds)  # .replace(hour=21, minute=0) if you want
+
         # Normalize column names from transform output
         rename_map = {}
         if "ticker" in df.columns and "ticker_id" not in df.columns:
-            rename_map["ticker"] = "ticker_id"
-        if "stock_ticker" in df.columns and "ticker_id" not in df.columns:
-            rename_map["stock_ticker"] = "ticker_id"
+            rename_map["ticker"] = "stock_ticker"
         if "wordcloud" in df.columns and "wordcloud_json" not in df.columns:
             rename_map["wordcloud"] = "wordcloud_json"
         if rename_map:
             df = df.rename(columns=rename_map)
+
+        # Overwrite / set created_at to the logical date timestamp
+        df["created_at"] = created_ts
 
         # Keep only columns that exist in finance.ticker_article
         wanted_cols = [
@@ -201,26 +213,16 @@ def financial_data_pipeline():
 
         df = df[present_cols].copy()
 
-        # Ensure created_at is a proper timestamp if present
-        if "created_at" in df.columns:
-            try:
-                import pandas as pd
-                df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
-            except Exception as e:
-                print(f"⚠️ Could not coerce created_at to datetime: {e}")
-
-        # Dedupe: latest row per (ticker_id, created_at DATE)
+        # Dedupe: latest row per (stock_ticker, created_at DATE)
         if "created_at" in df.columns and "ticker_id" in df.columns:
             df["created_date"] = df["created_at"].dt.date
-            # sort so the newest created_at is kept
             df = (
                 df.sort_values("created_at")
                 .drop_duplicates(subset=["ticker_id", "created_date"], keep="last")
                 .drop(columns=["created_date"])
             )
             print(f"✅ After dedupe, {len(df)} rows to insert into ticker_article")
-              
-        # Insert (no unique key defined on table schema shown)
+
         bulk_insert_dataframe(
             df,
             table="finance.ticker_article",
@@ -351,7 +353,7 @@ def financial_data_pipeline():
     sources_df = transform_source_reliability(sector_curated_df)
     
     # 6. Load transformed data to database in parallel
-    articles_load = load_article_data(articles_df)
+    articles_load = load_article_data(articles_df, ds="{{ ds }}")
     sources_load = load_sources_data(sources_df)
     sources_load >> articles_load  # Ensure FK targets exist before inserting articles
     # ticker_articles_load already defined above

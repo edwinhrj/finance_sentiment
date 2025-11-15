@@ -5,7 +5,7 @@ Writes data as JSONL for Spark consumption and returns folder paths.
 
 import yfinance as yf
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import pathlib
 
@@ -32,31 +32,80 @@ def _ensure_dir(p: str):
     pathlib.Path(p).mkdir(parents=True, exist_ok=True)
 
 
-def fetch_all_tickers(tickers):
-    """Fetch the latest OHLC data for multiple tickers using yfinance."""
-    print("🚀 Fetching market data from Yahoo Finance...")
+def _fetch_for_date(symbol: str, date_str: str) -> dict | None:
+    """
+    Fetch OHLC for a specific calendar date using yfinance.history(start, end).
 
+    - date_str: 'YYYY-MM-DD' (Airflow ds)
+    - Returns one row as dict, or None if no data for that date (e.g. weekend/holiday).
+    """
+    target = datetime.strptime(date_str, "%Y-%m-%d").date()
+    next_day = target + timedelta(days=1)
+
+    ticker = yf.Ticker(symbol)
+    hist = ticker.history(start=target, end=next_day)  # [target, target+1)
+
+    if hist.empty:
+        print(f"⚠️ No market data for {symbol} on {date_str} (maybe weekend/holiday)")
+        return None
+
+    row = hist.iloc[0]
+    return {
+        "symbol": symbol,
+        "date": date_str,  # align with ds
+        "open": float(row["Open"]),
+        "high": float(row["High"]),
+        "low": float(row["Low"]),
+        "close": float(row["Close"]),
+    }
+
+
+def _fetch_latest(symbol: str) -> dict | None:
+    """
+    Fallback: fetch latest available OHLC using period='5d' and last row.
+    Used when exec_date is None (ad-hoc run) or if you call main() without exec_date.
+    """
+    ticker = yf.Ticker(symbol)
+    hist = ticker.history(period="5d")
+
+    if hist.empty:
+        print(f"⚠️ No data found for {symbol} even with period='5d'")
+        return None
+
+    latest = hist.iloc[-1]
+    date_str = latest.name.strftime("%Y-%m-%d")
+    return {
+        "symbol": symbol,
+        "date": date_str,
+        "open": float(latest["Open"]),
+        "high": float(latest["High"]),
+        "low": float(latest["Low"]),
+        "close": float(latest["Close"]),
+    }
+
+
+def fetch_all_tickers(tickers, exec_date: str | None = None) -> pd.DataFrame:
+    """
+    Fetch OHLC for all tickers.
+
+    - If exec_date is provided: try to fetch data for that specific date (ds).
+    - If exec_date is None: behave like old version (latest available).
+    """
+    print("🚀 Fetching market data from Yahoo Finance...")
     data = []
+
     for symbol in tickers:
         try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="5d")  # last 5 days for safety
+            if exec_date:
+                row = _fetch_for_date(symbol, exec_date)
+            else:
+                row = _fetch_latest(symbol)
 
-            if hist.empty:
-                print(f"⚠️ No data found for {symbol}")
+            if row is None:
                 continue
 
-            latest = hist.iloc[-1]
-            data.append({
-                "symbol": symbol,
-                "date": latest.name.strftime("%Y-%m-%d"),
-                "open": float(latest["Open"]),
-                "high": float(latest["High"]),
-                "low": float(latest["Low"]),
-                "close": float(latest["Close"]),
-            })
-
-            print(f"✅ {symbol}: {latest.name.strftime('%Y-%m-%d')} fetched successfully")
+            print(f"✅ {symbol}: fetched data for {row['date']}")
+            data.append(row)
 
         except Exception as e:
             print(f"❌ Error fetching {symbol}: {e}")
@@ -68,16 +117,20 @@ def main(out_base_dir: str = None, exec_date: str = None):
     """
     Fetch ticker market data and write to JSONL.
     Returns the folder path for downstream Spark steps.
+
+    - out_base_dir: base directory (Airflow passes DATA_BASE/raw/market)
+    - exec_date: Airflow logical date {{ ds }} (YYYY-MM-DD) during scheduled/backfill runs
     """
     base = out_base_dir or RAW_BASE_DIR
 
+    # Folder partition is always based on logical execution date if provided
     date_str = exec_date or datetime.now().strftime("%Y-%m-%d")
     out_dir = os.path.join(base, f"date={date_str}")
     _ensure_dir(out_dir)
 
-    df = fetch_all_tickers(TICKERS)
+    df = fetch_all_tickers(TICKERS, exec_date=exec_date)
     if df.empty:
-        print("⚠️ No data fetched. Please check your internet connection.")
+        print(f"⚠️ No market data fetched for {date_str}. Check if this is a non-trading day.")
         return {"market_path": out_dir}
 
     out_path = os.path.join(out_dir, "part.jsonl")
