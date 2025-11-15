@@ -76,8 +76,7 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
         # 3. tickers (depends on sectors)
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.tickers (
-                ticker_id SERIAL PRIMARY KEY,
-                ticker_symbol TEXT UNIQUE NOT NULL,
+                ticker_id TEXT PRIMARY KEY,
                 sector_id INTEGER REFERENCES finance.sectors(sector_id)
             )
         """))
@@ -102,7 +101,7 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.ticker_article (
                 ticker_article_id SERIAL PRIMARY KEY,
-                ticker_id INTEGER REFERENCES finance.tickers(ticker_id),
+                ticker_id TEXT REFERENCES finance.tickers(ticker_id),
                 sentiment_from_yesterday BOOLEAN,
                 price_change_in_percentage FLOAT,
                 match BOOLEAN,
@@ -245,9 +244,9 @@ def hardcode_tickers_and_sectors(engine: Optional[Engine] = None) -> None:
         
         for ticker_symbol in tickers_data:
             conn.execute(text("""
-                INSERT INTO finance.tickers (ticker_symbol, sector_id)
-                VALUES (:ticker, :sector_id)
-                ON CONFLICT (ticker_symbol) DO NOTHING
-            """), {"ticker": ticker_symbol, "sector_id": sector_id})
+                INSERT INTO finance.tickers (ticker_id, sector_id)
+                VALUES (:ticker_id, :sector_id)
+                ON CONFLICT (ticker_id) DO NOTHING
+            """), {"ticker_id": ticker_symbol, "sector_id": sector_id})
         
         print(f"✅ Technology sector and tickers (AAPL, MSFT, AMZN, GOOGL, META) ensured in database")
