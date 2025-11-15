@@ -109,19 +109,6 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
                 wordcloud_json JSONB
             )
         """))
-        
-        # 6. old_sentiment (no dependencies) - preserved
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS finance.old_sentiment (
-                id SERIAL PRIMARY KEY,
-                stock_ticker TEXT,
-                sentiment_from_yesterday BOOLEAN,
-                price_change_in_percentage FLOAT,
-                match BOOLEAN,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """))
-        
         print("✅ All database schemas and tables created successfully (updated schema)")
 
 def bulk_insert_dataframe(

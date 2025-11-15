@@ -140,18 +140,6 @@ def financial_data_pipeline():
         transformed_articles = transform_sector_article_module.main(sector_news_df)
         return transformed_articles
     
-    @task(task_id='load_sentiment_to_supabase')
-    def load_sentiment_data(final_df):
-        print("🚀 Loading sentiment data to Supabase Postgres...")
-        
-        # Drop 'id' column if it exists - let database auto-generate it
-        if 'id' in final_df.columns:
-            final_df = final_df.drop(columns=['id'])
-            print("ℹ️  Dropped 'id' column - database will auto-generate it")
-        
-        bulk_insert_dataframe(final_df, table="finance.old_sentiment")
-        print("✅ Sentiment load complete.")
-    
     @task(task_id='load_articles_to_supabase')
     def load_article_data(articles_df):
         print("🚀 Loading article data to Supabase Postgres...")
@@ -170,10 +158,10 @@ def financial_data_pipeline():
         """
         Load ticker-level sentiment rows into finance.ticker_article.
         Business rule:
-        - For each (stock_ticker, created_at DATE), keep only the latest row.
+        - For each (ticker_id, created_at DATE), keep only the latest row.
 
         Target columns in table:
-          - stock_ticker (text)
+          - ticker_id (text)
           - sentiment_from_yesterday (boolean)
           - price_change_in_percentage (double precision)
           - match (boolean)
@@ -188,8 +176,10 @@ def financial_data_pipeline():
 
         # Normalize column names from transform output
         rename_map = {}
-        if "ticker" in df.columns and "stock_ticker" not in df.columns:
-            rename_map["ticker"] = "stock_ticker"
+        if "ticker" in df.columns and "ticker_id" not in df.columns:
+            rename_map["ticker"] = "ticker_id"
+        if "stock_ticker" in df.columns and "ticker_id" not in df.columns:
+            rename_map["stock_ticker"] = "ticker_id"
         if "wordcloud" in df.columns and "wordcloud_json" not in df.columns:
             rename_map["wordcloud"] = "wordcloud_json"
         if rename_map:
@@ -197,7 +187,7 @@ def financial_data_pipeline():
 
         # Keep only columns that exist in finance.ticker_article
         wanted_cols = [
-            "stock_ticker",
+            "ticker_id",
             "sentiment_from_yesterday",
             "price_change_in_percentage",
             "match",
@@ -219,13 +209,13 @@ def financial_data_pipeline():
             except Exception as e:
                 print(f"⚠️ Could not coerce created_at to datetime: {e}")
 
-        # Dedupe: latest row per (stock_ticker, created_at DATE)
-        if "created_at" in df.columns and "stock_ticker" in df.columns:
+        # Dedupe: latest row per (ticker_id, created_at DATE)
+        if "created_at" in df.columns and "ticker_id" in df.columns:
             df["created_date"] = df["created_at"].dt.date
             # sort so the newest created_at is kept
             df = (
                 df.sort_values("created_at")
-                .drop_duplicates(subset=["stock_ticker", "created_date"], keep="last")
+                .drop_duplicates(subset=["ticker_id", "created_date"], keep="last")
                 .drop(columns=["created_date"])
             )
             print(f"✅ After dedupe, {len(df)} rows to insert into ticker_article")
@@ -361,7 +351,6 @@ def financial_data_pipeline():
     sources_df = transform_source_reliability(sector_curated_df)
     
     # 6. Load transformed data to database in parallel
-    sentiment_load = load_sentiment_data(sentiment_df)
     articles_load = load_article_data(articles_df)
     sources_load = load_sources_data(sources_df)
     # ticker_articles_load already defined above
