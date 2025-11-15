@@ -109,6 +109,28 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
                 wordcloud_json JSONB
             )
         """))
+
+        # Indexes to support common joins and lookups
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_tickers_sector_id
+            ON finance.tickers (sector_id)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_sector_article_sector_id
+            ON finance.sector_article (sector_id)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_sector_article_date
+            ON finance.sector_article (date_published DESC)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_ticker_article_ticker_id
+            ON finance.ticker_article (ticker_id)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_ticker_article_created_at
+            ON finance.ticker_article (created_at DESC)
+        """))
         print("✅ All database schemas and tables created successfully (updated schema)")
 
 def bulk_insert_dataframe(
