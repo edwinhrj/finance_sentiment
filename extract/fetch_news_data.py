@@ -19,7 +19,7 @@ from typing import Optional, List, Dict
 # ------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------
-API_KEY = os.getenv("NEWS_API_KEY", "bdd295d9894c4f078a2973fd7cd15b97")
+API_KEY = os.getenv("NEWS_API_KEY", "cd308a4da3864db1b41c3324522dd44a")
 SECTORS = [
     "technology",
     "health",
