@@ -226,36 +226,54 @@ def bulk_insert_dataframe(
 
 def hardcode_tickers_and_sectors(engine: Optional[Engine] = None) -> None:
     """
-    Insert the 'technology' sector and key tech tickers (AAPL, MSFT, AMZN, GOOGL, META)
-    if they don't already exist in the database.
+    Ensure a baseline set of sectors and their representative tickers exist in the database.
     """
     if engine is None:
         engine = _make_engine_from_env()
     
     with engine.begin() as conn:
-        # 1. Insert 'technology' sector if it doesn't exist
-        conn.execute(text("""
-            INSERT INTO finance.sectors (sector_name)
-            VALUES ('technology')
-            ON CONFLICT (sector_name) DO NOTHING
-        """))
-        
-        # 2. Get the sector_id for 'technology'
-        result = conn.execute(text("""
-            SELECT sector_id FROM finance.sectors WHERE sector_name = 'technology'
-        """))
-        sector_id = result.fetchone()[0]
-        
-        # 3. Insert tickers if they don't exist
-        tickers_data = [
-            'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META'
+        sectors = [
+            "technology",
+            "health",
+            "business",
+            "science",
+            "entertainment",
         ]
-        
-        for ticker_symbol in tickers_data:
+
+        tickers_by_sector = [
+            ["MSFT", "AAPL", "NVDA", "GOOGL", "AVGO"],  # Information Technology
+            ["LLY", "JNJ", "UNH", "MRK", "ABBV"],       # Health Care
+            ["BRK.B", "JPM", "V", "BAC", "MA"],         # Business/Finance
+            ["TMO", "AMGN", "GILD", "REGN", "VRTX"],    # Science/Biotech
+            ["DIS", "NFLX", "CMCSA", "WBD", "EA"],      # Entertainment
+        ]
+
+        if len(sectors) != len(tickers_by_sector):
+            raise ValueError("Sectors and tickers_by_sector must be the same length.")
+
+        for sector_name, ticker_symbols in zip(sectors, tickers_by_sector):
+            # Insert sector if it doesn't exist
             conn.execute(text("""
-                INSERT INTO finance.tickers (ticker_id, sector_id)
-                VALUES (:ticker_id, :sector_id)
-                ON CONFLICT (ticker_id) DO NOTHING
-            """), {"ticker_id": ticker_symbol, "sector_id": sector_id})
-        
-        print(f"✅ Technology sector and tickers (AAPL, MSFT, AMZN, GOOGL, META) ensured in database")
+                INSERT INTO finance.sectors (sector_name)
+                VALUES (:sector_name)
+                ON CONFLICT (sector_name) DO NOTHING
+            """), {"sector_name": sector_name})
+
+            # Fetch its sector_id
+            result = conn.execute(text("""
+                SELECT sector_id FROM finance.sectors WHERE sector_name = :sector_name
+            """), {"sector_name": sector_name})
+            sector_id_row = result.fetchone()
+            if sector_id_row is None:
+                raise RuntimeError(f"Failed to retrieve sector_id for '{sector_name}'.")
+            sector_id = sector_id_row[0]
+
+            # Insert tickers for this sector
+            for ticker_symbol in ticker_symbols:
+                conn.execute(text("""
+                    INSERT INTO finance.tickers (ticker_id, sector_id)
+                    VALUES (:ticker_id, :sector_id)
+                    ON CONFLICT (ticker_id) DO NOTHING
+                """), {"ticker_id": ticker_symbol, "sector_id": sector_id})
+
+        print("✅ Baseline sectors and tickers ensured in database")

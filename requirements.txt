@@ -40,3 +40,4 @@ textblob>=0.17.1
 requests>=2.31.0
 
 apache-airflow-providers-apache-spark>=4.0.0
+astro-run-dag # This package is needed for the astro run command. It will be removed before a deploy

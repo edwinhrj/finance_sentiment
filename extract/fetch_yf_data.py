@@ -10,7 +10,21 @@ import os
 import pathlib
 
 # === Configuration ===
-TICKERS = ["AAPL", "MSFT", "AMZN", "GOOGL", "META"]
+SECTORS = [
+    "technology",
+    "health",
+    "business",
+    "science",
+    "entertainment",
+]
+SECTOR_TICKERS = [
+    ["MSFT", "AAPL", "NVDA", "GOOGL", "AVGO"],  # Information Technology
+    ["LLY", "JNJ", "UNH", "MRK", "ABBV"],       # Health Care
+    ["BRK.B", "JPM", "V", "BAC", "MA"],         # Business/Finance
+    ["TMO", "AMGN", "GILD", "REGN", "VRTX"],    # Science/Biotech
+    ["DIS", "NFLX", "CMCSA", "WBD", "EA"],      # Entertainment
+]
+TICKERS = [ticker for tickers in SECTOR_TICKERS for ticker in tickers]
 RAW_BASE_DIR = os.getenv("RAW_BASE_DIR", "/usr/local/airflow/data/raw/market")
 
 

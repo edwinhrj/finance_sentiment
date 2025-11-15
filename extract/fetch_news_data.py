@@ -20,8 +20,22 @@ from typing import Optional, List, Dict
 # CONFIG
 # ------------------------------------------------------------
 API_KEY = os.getenv("NEWS_API_KEY", "bdd295d9894c4f078a2973fd7cd15b97")
-TICKERS = ["AAPL", "MSFT", "AMZN", "GOOGL", "META"]
-SECTORS = ["technology"]
+SECTORS = [
+    "technology",
+    "health",
+    "business",
+    "science",
+    "entertainment",
+]
+# Tickers grouped per sector (order matches SECTORS)
+SECTOR_TICKERS = [
+    ["MSFT", "AAPL", "NVDA", "GOOGL", "AVGO"],  # Information Technology
+    ["LLY", "JNJ", "UNH", "MRK", "ABBV"],       # Health Care
+    ["BRK.B", "JPM", "V", "BAC", "MA"],         # Business/Finance
+    ["TMO", "AMGN", "GILD", "REGN", "VRTX"],    # Science/Biotech
+    ["DIS", "NFLX", "CMCSA", "WBD", "EA"],      # Entertainment
+]
+TICKERS = [ticker for tickers in SECTOR_TICKERS for ticker in tickers]
 RAW_BASE_DIR = os.getenv("RAW_BASE_DIR", "/usr/local/airflow/data/raw/news")
 
 # Automatically get the date (2 days ago)
