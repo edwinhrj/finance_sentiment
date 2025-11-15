@@ -15,11 +15,12 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
+from urllib.parse import urlparse
 
 # ------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------
-API_KEY = os.getenv("NEWS_API_KEY", "cd308a4da3864db1b41c3324522dd44a")
+API_KEY = os.getenv("NEWS_API_KEY", "7a040264759f4949aac599bbb46eb1a9")
 SECTORS = [
     "technology",
     "health",
@@ -49,6 +50,34 @@ DATE_STR = _two_days_ago.strftime("%Y-%m-%d")
 def _ensure_dir(p: str) -> None:
     pathlib.Path(p).mkdir(parents=True, exist_ok=True)
 
+
+def _derive_source_id(url: Optional[str]) -> str:
+    """Normalize a URL into a base-domain identifier (e.g., example.com)."""
+    if not url:
+        return ""
+
+    url = str(url).strip()
+    if not url:
+        return ""
+
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+
+    try:
+        import tldextract
+
+        parsed = urlparse(url)
+        extracted = tldextract.extract(parsed.netloc or url)
+        parts = [p for p in [extracted.subdomain, extracted.domain, extracted.suffix] if p]
+        base = ".".join(parts) if parts else parsed.netloc
+        return base.lower() if base else ""
+    except Exception:
+        try:
+            parsed = urlparse(url)
+            return (parsed.netloc or "").lower()
+        except Exception:
+            return ""
+
 # ------------------------------------------------------------
 # FUNCTION: Fetch News for One Ticker
 # ------------------------------------------------------------
@@ -75,7 +104,7 @@ def fetch_news_data_for_ticker(ticker: str) -> Optional[pd.DataFrame]:
 
         processed = [
             {
-                "source_id": art.get("source", {}).get("id"),
+                "source_id": _derive_source_id(art.get("url")),
                 "source_name": art.get("source", {}).get("name"),
                 "title": art.get("title"),
                 "content": art.get("content"),
@@ -136,6 +165,7 @@ def fetch_news_data_for_sector(sector: str, sector_id: int, num_articles: int) -
                 "source_url": art.get("url"),
                 "author": art.get("author"),
                 "source_name": art.get("source", {}).get("name"),
+                "source_id": _derive_source_id(art.get("url")),
             }
             for art in articles
         ]

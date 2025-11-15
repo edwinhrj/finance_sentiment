@@ -232,7 +232,7 @@ def financial_data_pipeline():
     def transform_source_reliability(sector_news_df):
         """
         Transform source URLs to base domains and compute reliability scores.
-        Uses sector_news_df which contains source_url and source_name from NewsAPI.
+        Uses sector_news_df which contains source_url from NewsAPI.
         """
         # Lazy import using importlib to avoid slow imports during DAG parsing
         import importlib
@@ -245,7 +245,7 @@ def financial_data_pipeline():
     def load_sources_data(sources_df):
         """
         Load source reliability data to finance.sources table.
-        Uses upsert on source_name to update existing sources.
+        Uses upsert on source_id to update existing sources.
         """
         print("🚀 Loading source reliability data to Supabase Postgres...")
         
@@ -253,11 +253,11 @@ def financial_data_pipeline():
             print("⚠️ No source reliability data to load")
             return
         
-        # Use upsert on source_name (unique column) to update existing records
+        # Use upsert on source_id (unique column) to update existing records
         bulk_insert_dataframe(
             sources_df, 
             table="finance.sources",
-            unique_cols=["source_name"]  # Upsert on source_name
+            unique_cols=["source_id"]  # Upsert on source_id
         )
         print("✅ Source reliability load complete.")
     # Define task execution order
@@ -353,6 +353,7 @@ def financial_data_pipeline():
     # 6. Load transformed data to database in parallel
     articles_load = load_article_data(articles_df)
     sources_load = load_sources_data(sources_df)
+    sources_load >> articles_load  # Ensure FK targets exist before inserting articles
     # ticker_articles_load already defined above
     
     # Set dependencies: schema setup -> populate reference data -> extraction -> unpack -> transform -> load

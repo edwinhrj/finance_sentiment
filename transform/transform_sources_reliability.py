@@ -1,7 +1,7 @@
 """
 Transform website reliability:
 - Compute reliability scores for article source URLs using compute_reliability function
-- Returns DataFrame with source_url and reliability_score columns
+- Returns DataFrame with source_id (normalized domain) and reliability metrics
 """
 
 # Heavy imports moved to functions to avoid slow DAG parsing
@@ -206,14 +206,14 @@ def compute_reliability(url):
 
 def main(articles_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Compute source reliability metrics aggregated by source_name.
+    Compute source reliability metrics aggregated by source_id.
     
     Args:
-        articles_df: DataFrame with articles containing 'source_url' and 'source_name' columns
+        articles_df: DataFrame with articles containing a 'source_url' column
         
     Returns:
         DataFrame with columns:
-        - source_name: The source name (UNIQUE)
+        - source_id: Normalized domain identifier (UNIQUE)
         - credibility_score: Average reliability score (0-100)
         - rating: Rating based on credibility_score ("A" >= 86, "B" > 55 and < 86, "C" <= 55)
         - last_verified: Date of verification (today)
@@ -222,7 +222,7 @@ def main(articles_df: pd.DataFrame) -> pd.DataFrame:
     
     if articles_df.empty:
         print("No articles data to process")
-        return pd.DataFrame(columns=["source_name", "credibility_score", "rating", "last_verified"])
+        return pd.DataFrame(columns=["source_id", "credibility_score", "rating", "last_verified"])
     
     if "source_url" not in articles_df.columns:
         raise ValueError("Missing required column 'source_url' in articles_df")
@@ -232,14 +232,14 @@ def main(articles_df: pd.DataFrame) -> pd.DataFrame:
     articles_df = articles_df.copy()
     articles_df["source_url"] = articles_df["source_url"].apply(normalize_url_to_base_domain)
     
-    # Use the normalized base domain as source_name (e.g., "www.reddit.com" instead of NewsAPI's "Reddit")
-    articles_df["source_name"] = articles_df["source_url"]
+    # Use the normalized base domain as source_id (e.g., "www.reddit.com" instead of NewsAPI's "Reddit")
+    articles_df["source_id"] = articles_df["source_url"]
     
     # Get unique URLs (which are now base domains) to avoid processing duplicates
     unique_urls = articles_df["source_url"].dropna().unique()
     print(f"Processing {len(unique_urls)} unique base domain URLs for reliability scoring...")
     
-    # Process each URL and store results with source_name
+    # Process each URL and store results with source_id
     url_results = []
     processed = 0
     
@@ -252,10 +252,10 @@ def main(articles_df: pd.DataFrame) -> pd.DataFrame:
             print(f"  Processing: {url[:80]}...")
             reliability_data = compute_reliability(url_for_computation)
             
-            # Use the normalized base domain as source_name
+            # Use the normalized base domain as source_id
             url_results.append({
                 "source_url": url,
-                "source_name": url,  # Use base domain as source_name
+                "source_id": url,  # Use base domain as source_id
                 "reliability_score": reliability_data["reliability_score"],
             })
             processed += 1
@@ -264,7 +264,7 @@ def main(articles_df: pd.DataFrame) -> pd.DataFrame:
             # Add default scores for failed URLs
             url_results.append({
                 "source_url": url,
-                "source_name": url,  # Use base domain as source_name
+                "source_id": url,  # Use base domain as source_id
                 "reliability_score": 0.0,
             })
             processed += 1
@@ -273,10 +273,10 @@ def main(articles_df: pd.DataFrame) -> pd.DataFrame:
     
     if url_df.empty:
         print("No valid URL results to aggregate")
-        return pd.DataFrame(columns=["source_name", "credibility_score", "rating", "last_verified"])
+        return pd.DataFrame(columns=["source_id", "credibility_score", "rating", "last_verified"])
     
-    # Aggregate by source_name
-    print(f"\nAggregating results by source_name...")
+    # Aggregate by source_id
+    print(f"\nAggregating results by source_id...")
     
     def calculate_rating(credibility_score):
         """Calculate rating based on credibility_score:
@@ -291,8 +291,8 @@ def main(articles_df: pd.DataFrame) -> pd.DataFrame:
         else:
             return "C"
     
-    # Group by source_name and calculate average credibility score
-    sources_df = url_df.groupby("source_name").agg({
+    # Group by source_id and calculate average credibility score
+    sources_df = url_df.groupby("source_id").agg({
         "reliability_score": "mean"  # Average credibility score
     }).reset_index()
     
@@ -307,7 +307,7 @@ def main(articles_df: pd.DataFrame) -> pd.DataFrame:
     
     # Select and reorder columns to match schema
     final_df = sources_df[[
-        "source_name",
+        "source_id",
         "credibility_score",
         "rating",
         "last_verified"

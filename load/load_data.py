@@ -65,8 +65,7 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
         # 2. sources (Source reliability master list) (no dependencies)
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.sources (
-                source_id SERIAL PRIMARY KEY,
-                source_name VARCHAR UNIQUE NOT NULL,
+                source_id VARCHAR PRIMARY KEY,
                 credibility_score FLOAT,
                 rating VARCHAR,
                 last_verified DATE
@@ -91,7 +90,7 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
                 date_published DATE,
                 source_url TEXT UNIQUE,
                 author TEXT,
-                source_name VARCHAR,
+                source_id VARCHAR REFERENCES finance.sources(source_id),
                 impact_score FLOAT,
                 created_at TIMESTAMP DEFAULT NOW()
             )

@@ -58,7 +58,7 @@ def load_sector_articles():
     sql = """
         SELECT
             title,
-            source_name,
+            source_id,
             date_published,
             impact_score,
             source_url
@@ -316,8 +316,8 @@ with right_col:
         )
         df_display["Published"] = df_display["date_published"].dt.strftime("%Y-%m-%d")
 
-        df_display = df_display[["Article", "impact_score", "source_name", "Published"]].rename(
-            columns={"impact_score": "Impact", "source_name": "Source"}
+        df_display = df_display[["Article", "impact_score", "source_id", "Published"]].rename(
+            columns={"impact_score": "Impact", "source_id": "Source"}
         )
 
         st.write(df_display.to_html(escape=False, index=False), unsafe_allow_html=True)
