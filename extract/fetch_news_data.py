@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 # ------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------
-API_KEY = os.getenv("NEWS_API_KEY", "7a040264759f4949aac599bbb46eb1a9")
+API_KEY = os.getenv("NEWS_API_KEY", "251038c202f5460b840bcab5990b98b8")
 SECTORS = [
     "technology",
     "health",
