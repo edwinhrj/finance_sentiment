@@ -65,8 +65,7 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
         # 2. sources (Source reliability master list) (no dependencies)
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.sources (
-                source_id SERIAL PRIMARY KEY,
-                source_name VARCHAR UNIQUE NOT NULL,
+                source_id VARCHAR PRIMARY KEY,
                 credibility_score FLOAT,
                 rating VARCHAR,
                 last_verified DATE
@@ -76,8 +75,7 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
         # 3. tickers (depends on sectors)
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.tickers (
-                ticker_id SERIAL PRIMARY KEY,
-                ticker_symbol TEXT UNIQUE NOT NULL,
+                ticker_id TEXT PRIMARY KEY,
                 sector_id INTEGER REFERENCES finance.sectors(sector_id)
             )
         """))
@@ -92,7 +90,7 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
                 date_published DATE,
                 source_url TEXT UNIQUE,
                 author TEXT,
-                source_name VARCHAR,
+                source_id VARCHAR REFERENCES finance.sources(source_id),
                 impact_score FLOAT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
@@ -102,7 +100,7 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS finance.ticker_article (
                 ticker_article_id SERIAL PRIMARY KEY,
-                ticker_id INTEGER REFERENCES finance.tickers(ticker_id),
+                ticker_id TEXT REFERENCES finance.tickers(ticker_id),
                 sentiment_from_yesterday BOOLEAN,
                 price_change_in_percentage FLOAT,
                 match BOOLEAN,
@@ -110,19 +108,28 @@ def setup_database_schema(engine: Optional[Engine] = None) -> None:
                 wordcloud_json JSONB
             )
         """))
-        
-        # 6. old_sentiment (no dependencies) - preserved
+
+        # Indexes to support common joins and lookups
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS finance.old_sentiment (
-                id SERIAL PRIMARY KEY,
-                stock_ticker TEXT,
-                sentiment_from_yesterday BOOLEAN,
-                price_change_in_percentage FLOAT,
-                match BOOLEAN,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+            CREATE INDEX IF NOT EXISTS idx_tickers_sector_id
+            ON finance.tickers (sector_id)
         """))
-        
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_sector_article_sector_id
+            ON finance.sector_article (sector_id)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_sector_article_date
+            ON finance.sector_article (date_published DESC)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_ticker_article_ticker_id
+            ON finance.ticker_article (ticker_id)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_ticker_article_created_at
+            ON finance.ticker_article (created_at DESC)
+        """))
         print("✅ All database schemas and tables created successfully (updated schema)")
 
 def bulk_insert_dataframe(
@@ -218,36 +225,54 @@ def bulk_insert_dataframe(
 
 def hardcode_tickers_and_sectors(engine: Optional[Engine] = None) -> None:
     """
-    Insert the 'technology' sector and key tech tickers (AAPL, MSFT, AMZN, GOOGL, META)
-    if they don't already exist in the database.
+    Ensure a baseline set of sectors and their representative tickers exist in the database.
     """
     if engine is None:
         engine = _make_engine_from_env()
     
     with engine.begin() as conn:
-        # 1. Insert 'technology' sector if it doesn't exist
-        conn.execute(text("""
-            INSERT INTO finance.sectors (sector_name)
-            VALUES ('technology')
-            ON CONFLICT (sector_name) DO NOTHING
-        """))
-        
-        # 2. Get the sector_id for 'technology'
-        result = conn.execute(text("""
-            SELECT sector_id FROM finance.sectors WHERE sector_name = 'technology'
-        """))
-        sector_id = result.fetchone()[0]
-        
-        # 3. Insert tickers if they don't exist
-        tickers_data = [
-            'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META'
+        sectors = [
+            "technology",
+            "health",
+            "business",
+            "science",
+            "entertainment",
         ]
-        
-        for ticker_symbol in tickers_data:
+
+        tickers_by_sector = [
+            ["MSFT", "AAPL", "NVDA", "GOOGL", "AVGO"],  # Information Technology
+            ["LLY", "JNJ", "UNH", "MRK", "ABBV"],       # Health Care
+            ["BRK.B", "JPM", "V", "BAC", "MA"],         # Business/Finance
+            ["TMO", "AMGN", "GILD", "REGN", "VRTX"],    # Science/Biotech
+            ["DIS", "NFLX", "CMCSA", "WBD", "EA"],      # Entertainment
+        ]
+
+        if len(sectors) != len(tickers_by_sector):
+            raise ValueError("Sectors and tickers_by_sector must be the same length.")
+
+        for sector_name, ticker_symbols in zip(sectors, tickers_by_sector):
+            # Insert sector if it doesn't exist
             conn.execute(text("""
-                INSERT INTO finance.tickers (ticker_symbol, sector_id)
-                VALUES (:ticker, :sector_id)
-                ON CONFLICT (ticker_symbol) DO NOTHING
-            """), {"ticker": ticker_symbol, "sector_id": sector_id})
-        
-        print(f"✅ Technology sector and tickers (AAPL, MSFT, AMZN, GOOGL, META) ensured in database")
+                INSERT INTO finance.sectors (sector_name)
+                VALUES (:sector_name)
+                ON CONFLICT (sector_name) DO NOTHING
+            """), {"sector_name": sector_name})
+
+            # Fetch its sector_id
+            result = conn.execute(text("""
+                SELECT sector_id FROM finance.sectors WHERE sector_name = :sector_name
+            """), {"sector_name": sector_name})
+            sector_id_row = result.fetchone()
+            if sector_id_row is None:
+                raise RuntimeError(f"Failed to retrieve sector_id for '{sector_name}'.")
+            sector_id = sector_id_row[0]
+
+            # Insert tickers for this sector
+            for ticker_symbol in ticker_symbols:
+                conn.execute(text("""
+                    INSERT INTO finance.tickers (ticker_id, sector_id)
+                    VALUES (:ticker_id, :sector_id)
+                    ON CONFLICT (ticker_id) DO NOTHING
+                """), {"ticker_id": ticker_symbol, "sector_id": sector_id})
+
+        print("✅ Baseline sectors and tickers ensured in database")

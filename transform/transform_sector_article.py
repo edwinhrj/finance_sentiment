@@ -10,6 +10,8 @@ from datetime import datetime
 from functools import lru_cache
 # transformers and torch imported lazily in get_finbert_pipeline()
 
+from transform.transform_sources_reliability import normalize_url_to_base_domain
+
 
 @lru_cache(maxsize=1)
 def get_finbert_pipeline():
@@ -93,7 +95,7 @@ def apply_finbert_to_parquet(curated_clean_path: str, curated_final_path: str) -
     if df.empty:
         print("ℹ️ No rows to score; writing empty final parquet.")
         final_columns = [
-            'sector_id','title','content','date_published','source_url','author','source_name','impact_score'
+            'sector_id','title','content','date_published','source_url','author','source_id','impact_score'
         ]
         pd.DataFrame(columns=final_columns).to_parquet(curated_final_path, index=False)
         return curated_final_path
@@ -104,10 +106,22 @@ def apply_finbert_to_parquet(curated_clean_path: str, curated_final_path: str) -
     df['impact_score'] = df['combined_text'].apply(calculate_impact_score)
     df = df.drop(columns=['combined_text'])
 
+    # Derive normalized source_id from source_url for database FK linkage
+    df['source_id'] = df['source_url'].apply(normalize_url_to_base_domain)
+    missing_mask = df['source_id'].isna() | (df['source_id'] == "")
+    missing_ids = int(missing_mask.sum())
+    if missing_ids:
+        print(f"⚠️ Unable to derive source_id for {missing_ids} articles; setting to None")
+        df.loc[missing_mask, 'source_id'] = None
+
+    # Drop legacy source_name column if present
+    if 'source_name' in df.columns:
+        df = df.drop(columns=['source_name'])
+
     # Ensure final schema & order
     final_columns = [
         'sector_id', 'title', 'content', 'date_published',
-        'source_url', 'author', 'source_name', 'impact_score'
+        'source_url', 'author', 'source_id', 'impact_score'
     ]
     for col in final_columns:
         if col not in df.columns:
@@ -137,7 +151,7 @@ def main(sector_news_df: pd.DataFrame) -> pd.DataFrame:
         - date_published (DATE)
         - source_url (TEXT)
         - author (TEXT)
-        - source_name (VARCHAR)
+        - source_id (VARCHAR) - normalized base domain for FK to finance.sources
         - impact_score (FLOAT) - sentiment score from FinBERT (-1.0 to +1.0)
     """
     print("🔄 Starting article transformation...")
@@ -176,6 +190,18 @@ def main(sector_news_df: pd.DataFrame) -> pd.DataFrame:
     
     # Drop the temporary combined_text column
     df = df.drop(columns=['combined_text'])
+
+    # Derive normalized source_id for FK linkage
+    df['source_id'] = df['source_url'].apply(normalize_url_to_base_domain)
+    missing_mask = df['source_id'].isna() | (df['source_id'] == "")
+    missing_ids = int(missing_mask.sum())
+    if missing_ids:
+        print(f"⚠️ Unable to derive source_id for {missing_ids} articles; setting to None")
+        df.loc[missing_mask, 'source_id'] = None
+
+    # Remove legacy source_name column if present
+    if 'source_name' in df.columns:
+        df = df.drop(columns=['source_name'])
     
     print(f"✅ Impact scores calculated. Range: [{df['impact_score'].min():.4f}, {df['impact_score'].max():.4f}]")
     print(f"📊 Average impact score: {df['impact_score'].mean():.4f}")
@@ -188,7 +214,7 @@ def main(sector_news_df: pd.DataFrame) -> pd.DataFrame:
         'date_published',
         'source_url',
         'author',
-        'source_name',
+        'source_id',
         'impact_score'
     ]
     

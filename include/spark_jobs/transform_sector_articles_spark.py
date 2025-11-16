@@ -11,7 +11,7 @@ REQUIRED_COLS = [
     "date_published", # DATE
     "source_url",     # STRING (unique key downstream)
     "author",         # STRING
-    "source_name",    # STRING
+    "source_id",      # STRING
 ]
 
 
@@ -33,7 +33,7 @@ def _ensure_schema(df):
            .withColumn("content", F.col("content").cast(T.StringType())) \
            .withColumn("source_url", F.col("source_url").cast(T.StringType())) \
            .withColumn("author", F.col("author").cast(T.StringType())) \
-           .withColumn("source_name", F.col("source_name").cast(T.StringType()))
+           .withColumn("source_id", F.col("source_id").cast(T.StringType()))
 
     # Normalize date: accept ISO strings (e.g. 2025-11-05T12:34:56Z) or plain dates; drop time
     df = df.withColumn(

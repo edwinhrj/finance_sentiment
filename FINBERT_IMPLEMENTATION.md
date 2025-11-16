@@ -40,7 +40,7 @@ The transformed DataFrame now includes:
 - `date_published` (DATE)
 - `source_url` (TEXT)
 - `author` (TEXT)
-- `source_name` (VARCHAR)
+- `source_id` (VARCHAR)
 - **`impact_score` (FLOAT)** ← NEW
 
 ## Example Output

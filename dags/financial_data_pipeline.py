@@ -140,23 +140,14 @@ def financial_data_pipeline():
         transformed_articles = transform_sector_article_module.main(sector_news_df)
         return transformed_articles
     
-    @task(task_id='load_sentiment_to_supabase')
-    def load_sentiment_data(final_df):
-        print("🚀 Loading sentiment data to Supabase Postgres...")
-        
-        # Drop 'id' column if it exists - let database auto-generate it
-        if 'id' in final_df.columns:
-            final_df = final_df.drop(columns=['id'])
-            print("ℹ️  Dropped 'id' column - database will auto-generate it")
-        
-        bulk_insert_dataframe(final_df, table="finance.old_sentiment")
-        print("✅ Sentiment load complete.")
-    
     @task(task_id='load_articles_to_supabase')
-    def load_article_data(articles_df):
+    def load_article_data(articles_df, ds=None):
         print("🚀 Loading article data to Supabase Postgres...")
 
-        
+        import pandas as pd
+        articles_df = articles_df. copy ()
+        articles_df ["created_at"] = pd. to_datetime(ds)
+
         bulk_insert_dataframe(
             articles_df,
             table="finance.sector_article",
@@ -170,15 +161,15 @@ def financial_data_pipeline():
         """
         Load ticker-level sentiment rows into finance.ticker_article.
         Business rule:
-        - For each (stock_ticker, created_at DATE), keep only the latest row.
+        - For each (ticker_id, created_at DATE), keep only the latest row.
 
         Target columns in table:
-          - stock_ticker (text)
-          - sentiment_from_yesterday (boolean)
-          - price_change_in_percentage (double precision)
-          - match (boolean)
-          - created_at (timestamp without time zone)
-          - wordcloud_json (jsonb)
+        - ticker_id (text)
+        - sentiment_from_yesterday (boolean)
+        - price_change_in_percentage (double precision)
+        - match (boolean)
+        - created_at (timestamp without time zone)
+        - wordcloud_json (jsonb)
         """
         print("🚀 Loading ticker articles (sentiment rows) to Supabase Postgres...")
 
@@ -186,18 +177,29 @@ def financial_data_pipeline():
             print("⚠️ No ticker sentiment rows to load")
             return
 
+        import pandas as pd
+        # get Airflow logical date (ds) for this run
+        from airflow.operators.python import get_current_context
+        ctx = get_current_context()
+        ds = ctx["ds"]            # 'YYYY-MM-DD'
+        # optional: set a "market close" time (e.g. 21:00 UTC) or just midnight
+        created_ts = pd.to_datetime(ds)  # .replace(hour=21, minute=0) if you want
+
         # Normalize column names from transform output
         rename_map = {}
-        if "ticker" in df.columns and "stock_ticker" not in df.columns:
+        if "ticker" in df.columns and "ticker_id" not in df.columns:
             rename_map["ticker"] = "stock_ticker"
         if "wordcloud" in df.columns and "wordcloud_json" not in df.columns:
             rename_map["wordcloud"] = "wordcloud_json"
         if rename_map:
             df = df.rename(columns=rename_map)
 
+        # Overwrite / set created_at to the logical date timestamp
+        df["created_at"] = created_ts
+
         # Keep only columns that exist in finance.ticker_article
         wanted_cols = [
-            "stock_ticker",
+            "ticker_id",
             "sentiment_from_yesterday",
             "price_change_in_percentage",
             "match",
@@ -211,26 +213,16 @@ def financial_data_pipeline():
 
         df = df[present_cols].copy()
 
-        # Ensure created_at is a proper timestamp if present
-        if "created_at" in df.columns:
-            try:
-                import pandas as pd
-                df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
-            except Exception as e:
-                print(f"⚠️ Could not coerce created_at to datetime: {e}")
-
         # Dedupe: latest row per (stock_ticker, created_at DATE)
-        if "created_at" in df.columns and "stock_ticker" in df.columns:
+        if "created_at" in df.columns and "ticker_id" in df.columns:
             df["created_date"] = df["created_at"].dt.date
-            # sort so the newest created_at is kept
             df = (
                 df.sort_values("created_at")
-                .drop_duplicates(subset=["stock_ticker", "created_date"], keep="last")
+                .drop_duplicates(subset=["ticker_id", "created_date"], keep="last")
                 .drop(columns=["created_date"])
             )
             print(f"✅ After dedupe, {len(df)} rows to insert into ticker_article")
-              
-        # Insert (no unique key defined on table schema shown)
+
         bulk_insert_dataframe(
             df,
             table="finance.ticker_article",
@@ -242,7 +234,7 @@ def financial_data_pipeline():
     def transform_source_reliability(sector_news_df):
         """
         Transform source URLs to base domains and compute reliability scores.
-        Uses sector_news_df which contains source_url and source_name from NewsAPI.
+        Uses sector_news_df which contains source_url from NewsAPI.
         """
         # Lazy import using importlib to avoid slow imports during DAG parsing
         import importlib
@@ -255,7 +247,7 @@ def financial_data_pipeline():
     def load_sources_data(sources_df):
         """
         Load source reliability data to finance.sources table.
-        Uses upsert on source_name to update existing sources.
+        Uses upsert on source_id to update existing sources.
         """
         print("🚀 Loading source reliability data to Supabase Postgres...")
         
@@ -263,11 +255,11 @@ def financial_data_pipeline():
             print("⚠️ No source reliability data to load")
             return
         
-        # Use upsert on source_name (unique column) to update existing records
+        # Use upsert on source_id (unique column) to update existing records
         bulk_insert_dataframe(
             sources_df, 
             table="finance.sources",
-            unique_cols=["source_name"]  # Upsert on source_name
+            unique_cols=["source_id"]  # Upsert on source_id
         )
         print("✅ Source reliability load complete.")
     # Define task execution order
@@ -361,9 +353,9 @@ def financial_data_pipeline():
     sources_df = transform_source_reliability(sector_curated_df)
     
     # 6. Load transformed data to database in parallel
-    sentiment_load = load_sentiment_data(sentiment_df)
-    articles_load = load_article_data(articles_df)
+    articles_load = load_article_data(articles_df, ds="{{ ds }}")
     sources_load = load_sources_data(sources_df)
+    sources_load >> articles_load  # Ensure FK targets exist before inserting articles
     # ticker_articles_load already defined above
     
     # Set dependencies: schema setup -> populate reference data -> extraction -> unpack -> transform -> load

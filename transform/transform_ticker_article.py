@@ -145,12 +145,12 @@ def merge_sentiment_and_prices(sentiment_df, price_df):
     sg_time = datetime.now(pytz.timezone("Asia/Singapore"))
     merged["created_at"] = sg_time
     merged["id"] = [str(uuid.uuid4()) for _ in range(len(merged))]
-    merged["stock_ticker"] = merged["symbol"]
+    merged["ticker_id"] = merged["symbol"]
 
     final_df = merged[
         [
             "id",
-            "stock_ticker",
+            "ticker_id",
             "sentiment_from_yesterday",
             "price_change_in_percentage",
             "match",
@@ -342,12 +342,12 @@ def merge_sentiment_and_prices(sentiment_df: pd.DataFrame, price_df: pd.DataFram
     sg_time = datetime.now(pytz.timezone("Asia/Singapore"))
     merged["created_at"] = sg_time
     merged["id"] = [str(uuid.uuid4()) for _ in range(len(merged))]
-    merged["stock_ticker"] = merged["symbol"]
+    merged["ticker_id"] = merged["symbol"]
 
     final_df = merged[
         [
             "id",
-            "stock_ticker",
+            "ticker_id",
             "sentiment_from_yesterday",
             "price_change_in_percentage",
             "match",
