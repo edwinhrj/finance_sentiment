@@ -1,40 +1,155 @@
-# Overview
+Financial News Sentiment & Market Analysis Pipeline 📈📰
 
-Welcome to Astronomer! This project was generated after you ran 'astro dev init' using the Astronomer CLI. This readme describes the contents of the project, as well as how to run Apache Airflow on your local machine.
+📖 Overview
 
-# Project Contents
+This project is an end-to-end NLP analytics pipeline designed to ingest financial news, quantify sentiment using FinBERT, and correlate these signals with stock price movements.
 
-Your Astro project contains the following files and folders:
+Developed for IS3107 (Data Engineering) at the National University of Singapore (NUS), this system addresses information overload in financial markets by converting unstructured text into structured, actionable insights. The pipeline automates the extraction of data from news APIs and Yahoo Finance, processes it using Spark and NLP models, and visualizes the results in an interactive dashboard.
 
-- dags: This folder contains the Python files for your Airflow DAGs. By default, this directory includes one example DAG:
-  - `example_astronauts`: This DAG shows a simple ETL pipeline example that queries the list of astronauts currently in space from the Open Notify API and prints a statement for each astronaut. The DAG uses the TaskFlow API to define tasks in Python, and dynamic task mapping to dynamically print a statement for each astronaut. For more on how this DAG works, see our [Getting started tutorial](https://www.astronomer.io/docs/learn/get-started-with-airflow).
-- Dockerfile: This file contains a versioned Astro Runtime Docker image that provides a differentiated Airflow experience. If you want to execute other commands or overrides at runtime, specify them here.
-- include: This folder contains any additional files that you want to include as part of your project. It is empty by default.
-- packages.txt: Install OS-level packages needed for your project by adding them to this file. It is empty by default.
-- requirements.txt: Install Python packages needed for your project by adding them to this file. It is empty by default.
-- plugins: Add custom or community plugins for your project to this file. It is empty by default.
-- airflow_settings.yaml: Use this local-only file to specify Airflow Connections, Variables, and Pools instead of entering them in the Airflow UI as you develop DAGs in this project.
+🏗 System Architecture
 
-# Deploy Your Project Locally
+The system follows a modular ETL (Extract, Transform, Load) architecture orchestrated by Apache Airflow (running on Astronomer).
 
-Start Airflow on your local machine by running 'astro dev start'.
+High-Level Data Flow:
 
-This command will spin up five Docker containers on your machine, each for a different Airflow component:
+Extraction: * News: Fetches ticker-specific and sector-specific articles via NewsAPI.
 
-- Postgres: Airflow's Metadata Database
-- Scheduler: The Airflow component responsible for monitoring and triggering tasks
-- DAG Processor: The Airflow component responsible for parsing DAGs
-- API Server: The Airflow component responsible for serving the Airflow UI and API
-- Triggerer: The Airflow component responsible for triggering deferred tasks
+Market Data: Fetches daily OHLC stock data via Yahoo Finance (yfinance).
 
-When all five containers are ready the command will open the browser to the Airflow UI at http://localhost:8080/. You should also be able to access your Postgres Database at 'localhost:5432/postgres' with username 'postgres' and password 'postgres'.
+Format: Data is staged as date-partitioned JSONL files.
 
-Note: If you already have either of the above ports allocated, you can either [stop your existing Docker containers or change the port](https://www.astronomer.io/docs/astro/cli/troubleshoot-locally#ports-are-not-available-for-my-local-airflow-webserver).
+Transformation (Spark): * Schema enforcement, data normalization (timestamps), and deduplication using Apache Spark.
 
-# Deploy Your Project to Astronomer
+Output stored as curated Parquet files.
 
-If you have an Astronomer account, pushing code to a Deployment on Astronomer is simple. For deploying instructions, refer to Astronomer documentation: https://www.astronomer.io/docs/astro/deploy-code/
+Enrichment (NLP): * Sentiment analysis using FinBERT (Hugging Face) to generate impact scores.
 
-# Contact
+Calculation of source reliability scores.
 
-The Astronomer CLI is maintained with love by the Astronomer team. To report a bug or suggest a change, reach out to our support.
+Loading: * Data is loaded into a Supabase (PostgreSQL) database.
+
+Visualization: * A Streamlit dashboard provides interactive charts comparing sentiment trends against price action.
+
+🛠 Tech Stack
+
+Component
+
+Technology
+
+Description
+
+Orchestration
+
+Apache Airflow
+
+Managed via Astronomer; handles scheduling and dependency management.
+
+Processing
+
+Apache Spark
+
+PySpark for cleaning, normalization, and deduplication.
+
+Language
+
+Python
+
+Core language for DAGs, scripts, and extractors.
+
+ML/NLP
+
+FinBERT
+
+Pre-trained NLP model for financial sentiment scoring.
+
+Database
+
+Supabase
+
+PostgreSQL database for persistent storage and analytics.
+
+Frontend
+
+Streamlit
+
+Interactive web dashboard for end-users.
+
+Containerization
+
+Docker
+
+Used by Astronomer to containerize the Airflow environment.
+
+📂 Project Structure
+
+.
+├── dags/
+│   └── financial_data_pipeline.py   # Main Airflow DAG
+├── include/
+│   ├── extract/                     # Python scripts for API extraction
+│   ├── spark_jobs/                  # PySpark cleaning & normalization scripts
+│   ├── transform/                   # FinBERT & Pandas transformation logic
+│   └── load/                        # Database loading scripts
+├── streamlit/
+│   └── app.py                       # Dashboard application
+├── Dockerfile                       # Astronomer Docker configuration
+├── packages.txt                     # OS-level dependencies
+└── requirements.txt                 # Python dependencies
+
+
+🚀 Getting Started
+
+Prerequisites
+
+Docker Desktop
+
+Astro CLI (for running Airflow locally)
+
+Python 3.9+
+
+Installation
+
+Clone the repository:
+
+git clone [https://github.com/yourusername/financial-sentiment-pipeline.git](https://github.com/yourusername/financial-sentiment-pipeline.git)
+cd financial-sentiment-pipeline
+
+
+Configure Environment Variables:
+Create a .env file (or configure within Airflow UI variables) with the following keys:
+
+NEWS_API_KEY=your_newsapi_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_service_key
+
+
+Start the Airflow Environment (via Astro):
+
+astro dev start
+
+
+This will spin up the Airflow Webserver, Scheduler, and Postgres metadata DB in Docker containers.
+
+Access Airflow UI:
+Open http://localhost:8080 and toggle the financial_data_pipeline DAG to ON.
+
+Running the Dashboard
+
+To launch the visualization interface:
+
+cd streamlit
+pip install -r requirements.txt
+streamlit run app.py
+
+
+📊 Database Schema
+
+The project uses a normalized 3NF schema in PostgreSQL:
+
+tickers / sectors: Reference tables.
+
+sector_article: Stores raw news text, metadata, and impact scores for broad market news.
+
+ticker_article: Stores ticker-specific news linked to sentiment scores and daily price changes.
+
+sources: Tracks news publisher reliability and credibility ratings.
