@@ -1,4 +1,6 @@
-# Financial News Sentiment & Market Analysis Pipeline 📈📰
+# Financial News Sentiment & Market Analysis Pipeline 
+
+![telegram-cloud-photo-size-5-6111831912566426935-y](https://github.com/user-attachments/assets/4d24908a-fdfc-4c48-bc9c-3fcca9cac9e8)
 
 ## 📖 Overview
 
