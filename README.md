@@ -1,6 +1,6 @@
-Financial News Sentiment & Market Analysis Pipeline 📈📰
+# Financial News Sentiment & Market Analysis Pipeline 📈📰
 
-📖 Overview
+## 📖 Overview
 
 This project is an end-to-end NLP analytics pipeline designed to ingest financial news, quantify sentiment using FinBERT, and correlate these signals with stock price movements.
 
@@ -10,25 +10,35 @@ Developed for IS3107 (Data Engineering) at the National University of Singapore 
 
 The system follows a modular ETL (Extract, Transform, Load) architecture orchestrated by Apache Airflow (running on Astronomer).
 
-High-Level Data Flow:
+High-Level Data Flow
 
-Extraction: * News: Fetches ticker-specific and sector-specific articles via NewsAPI.
+Extraction:
+
+News: Fetches ticker-specific and sector-specific articles via NewsAPI.
 
 Market Data: Fetches daily OHLC stock data via Yahoo Finance (yfinance).
 
 Format: Data is staged as date-partitioned JSONL files.
 
-Transformation (Spark): * Schema enforcement, data normalization (timestamps), and deduplication using Apache Spark.
+Transformation (Spark):
+
+Schema enforcement, data normalization (timestamps), and deduplication using Apache Spark.
 
 Output stored as curated Parquet files.
 
-Enrichment (NLP): * Sentiment analysis using FinBERT (Hugging Face) to generate impact scores.
+Enrichment (NLP):
+
+Sentiment analysis using FinBERT (Hugging Face) to generate impact scores.
 
 Calculation of source reliability scores.
 
-Loading: * Data is loaded into a Supabase (PostgreSQL) database.
+Loading:
 
-Visualization: * A Streamlit dashboard provides interactive charts comparing sentiment trends against price action.
+Data is loaded into a Supabase (PostgreSQL) database.
+
+Visualization:
+
+A Streamlit dashboard provides interactive charts comparing sentiment trends against price action.
 
 🛠 Tech Stack
 
@@ -153,3 +163,17 @@ sector_article: Stores raw news text, metadata, and impact scores for broad mark
 ticker_article: Stores ticker-specific news linked to sentiment scores and daily price changes.
 
 sources: Tracks news publisher reliability and credibility ratings.
+
+👥 Contributors (Group 12)
+
+Koh Ken Tze (A0251805J)
+
+Ho Renjie, Edwin (A0253059A)
+
+Kwek Jie Han (A0234221X)
+
+Chia Meng Chuan Nigel (A0252926Y)
+
+Andrew Ang Tze Wee (A0252801N)
+
+Chong Ke Lin, Mark (A0252467Y)
