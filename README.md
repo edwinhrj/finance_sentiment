@@ -6,13 +6,13 @@ This project is an end-to-end NLP analytics pipeline designed to ingest financia
 
 Developed for IS3107 (Data Engineering) at the National University of Singapore (NUS), this system addresses information overload in financial markets by converting unstructured text into structured, actionable insights. The pipeline automates the extraction of data from news APIs and Yahoo Finance, processes it using Spark and NLP models, and visualizes the results in an interactive dashboard.
 
-🏗 System Architecture
+## 🏗 System Architecture
 
 The system follows a modular ETL (Extract, Transform, Load) architecture orchestrated by Apache Airflow (running on Astronomer).
 
-High-Level Data Flow
+### High-Level Data Flow
 
-Extraction:
+#### Extraction:
 
 News: Fetches ticker-specific and sector-specific articles via NewsAPI.
 
@@ -20,7 +20,7 @@ Market Data: Fetches daily OHLC stock data via Yahoo Finance (yfinance).
 
 Format: Data is staged as date-partitioned JSONL files.
 
-Transformation (Spark):
+#### Transformation (Spark):
 
 Schema enforcement, data normalization (timestamps), and deduplication using Apache Spark.
 
@@ -32,65 +32,27 @@ Sentiment analysis using FinBERT (Hugging Face) to generate impact scores.
 
 Calculation of source reliability scores.
 
-Loading:
+#### Loading:
 
 Data is loaded into a Supabase (PostgreSQL) database.
 
-Visualization:
+#### Downstream Task:
 
 A Streamlit dashboard provides interactive charts comparing sentiment trends against price action.
 
-🛠 Tech Stack
+## 🛠 Tech Stack
 
-Component
-
-Technology
-
-Description
-
-Orchestration
-
-Apache Airflow
-
-Managed via Astronomer; handles scheduling and dependency management.
-
-Processing
-
-Apache Spark
-
-PySpark for cleaning, normalization, and deduplication.
-
-Language
-
-Python
-
-Core language for DAGs, scripts, and extractors.
-
-ML/NLP
-
-FinBERT
-
-Pre-trained NLP model for financial sentiment scoring.
-
-Database
-
-Supabase
-
-PostgreSQL database for persistent storage and analytics.
-
-Frontend
-
-Streamlit
-
-Interactive web dashboard for end-users.
-
-Containerization
-
-Docker
+- Apache Airflow, managed via Astronomer
+- Apache Spark
+- PySpark
+- FinBERT
+- PostgreSQL 
+- Streamlit
+- Docker
 
 Used by Astronomer to containerize the Airflow environment.
 
-📂 Project Structure
+## 📂 Project Structure
 
 .
 ├── dags/
@@ -107,7 +69,7 @@ Used by Astronomer to containerize the Airflow environment.
 └── requirements.txt                 # Python dependencies
 
 
-🚀 Getting Started
+## 🚀 Getting Started
 
 Prerequisites
 
@@ -152,7 +114,7 @@ pip install -r requirements.txt
 streamlit run app.py
 
 
-📊 Database Schema
+## 📊 Database Schema
 
 The project uses a normalized 3NF schema in PostgreSQL:
 
@@ -163,17 +125,3 @@ sector_article: Stores raw news text, metadata, and impact scores for broad mark
 ticker_article: Stores ticker-specific news linked to sentiment scores and daily price changes.
 
 sources: Tracks news publisher reliability and credibility ratings.
-
-👥 Contributors (Group 12)
-
-Koh Ken Tze (A0251805J)
-
-Ho Renjie, Edwin (A0253059A)
-
-Kwek Jie Han (A0234221X)
-
-Chia Meng Chuan Nigel (A0252926Y)
-
-Andrew Ang Tze Wee (A0252801N)
-
-Chong Ke Lin, Mark (A0252467Y)
